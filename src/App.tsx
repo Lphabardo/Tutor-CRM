@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson } from './lib/api';
+import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentDocUrl } from './lib/api';
 import OnboardingForm from './components/OnboardingForm';
 
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
@@ -122,6 +122,19 @@ function StudentsTab() {
     }
   };
 
+  const handleUpdateDocUrl = async (studentId: string, currentUrl: string) => {
+    const newUrl = prompt('Вставьте ссылку на Google Документ (конспект и ДЗ):', currentUrl || '');
+    if (newUrl === null) return; // Пользователь нажал "Отмена"
+    
+    try {
+      await updateStudentDocUrl(studentId, newUrl);
+      await loadStudents();
+      alert('Ссылка успешно сохранена!');
+    } catch (err: any) {
+      alert('Ошибка: ' + err.message);
+    }
+  };
+
   if (loading) return <div className="p-6 text-center">Загрузка...</div>;
 
   return (
@@ -195,6 +208,12 @@ function StudentsTab() {
                 className="flex-1 bg-blue-500 text-white py-2 rounded text-sm"
               >
                 +5 уроков
+              </button>
+              <button 
+                onClick={() => handleUpdateDocUrl(student.id, student.google_doc_url)}
+                className="flex-1 bg-purple-500 text-white py-2 rounded text-sm flex items-center justify-center gap-1"
+              >
+                📎 Документ {student.google_doc_url ? '✅' : ''}
               </button>
             </div>
           </div>

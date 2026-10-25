@@ -132,6 +132,15 @@ export async function adjustBalance(studentId: string, amount: number, reason: s
   if (error) throw error;
 }
 
+// Обновить ссылку на Google Документ для ученика
+export async function updateStudentDocUrl(studentId: string, docUrl: string) {
+  const { error } = await supabase
+    .from('tutor_profiles')
+    .update({ google_doc_url: docUrl })
+    .eq('id', studentId);
+  if (error) throw error;
+}
+
 // Назначить урок ученику
 export async function createLesson(studentId: string, startTime: string, topic: string) {
   const { data, error } = await supabase
