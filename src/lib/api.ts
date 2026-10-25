@@ -33,73 +33,91 @@ export async function authenticateUser() {
     };
   }
 
-  // Инициализируем WebApp (расширяем на весь экран)
+  // Инициализируем WebApp
   WebApp.ready();
   WebApp.expand();
 
-  // Получаем initData (может быть в initData или initDataUnsafe)
+  let telegramId: string | null = null;
+  let fullName = 'Ученик';
   const initData = WebApp.initData;
-  
-  // Если initData нет, пробуем получить данные из initDataUnsafe (менее безопасно, но работает)
-  if (!initData && WebApp.initDataUnsafe) {
-    const user = WebApp.initDataUnsafe.user;
-    if (user) {
-       // Если initData нет, но есть пользователь, создаем заглушку для запроса
-       // Но лучше все же использовать verify-telegram с initData, поэтому пробуем получить initData еще раз
-       // Если совсем ничего нет, кидаем ошибку
-       throw new Error("Не удалось получить данные авторизации Telegram. Попробуйте перезапустить приложение.");
+
+  // 1. Пробуем получить данные из initData (безопасный путь)
+  if (initData) {
+    const telegramUser = parseTelegramInitData(initData);
+    if (telegramUser) {
+      telegramId = telegramUser.id?.toString() || null;
+      fullName = `${telegramUser.first_name || ''} ${telegramUser.last_name || ''}`.trim() || 'Ученик';
     }
   }
 
-  if (!initData) {
-     throw new Error("Нет данных инициализации Telegram. Пожалуйста, откройте приложение через бота.");
+  // 2. Если initData нет, пробуем initDataUnsafe (запасной путь, работает в Mini App)
+  if (!telegramId && WebApp.initDataUnsafe?.user) {
+    const unsafeUser = WebApp.initDataUnsafe.user;
+    telegramId = unsafeUser.id?.toString() || null;
+    fullName = `${unsafeUser.first_name || ''} ${unsafeUser.last_name || ''}`.trim() || 'Ученик';
   }
 
-  // Получаем данные пользователя из Telegram (через нашу безопасную функцию)
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-telegram`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ initData })
+  // 3. Если вообще нет данных о пользователе — ошибка
+  if (!telegramId) {
+    throw new Error("Не удалось получить данные пользователя Telegram. Пожалуйста, закройте и откройте приложение заново через бота.");
+  }
+
+  // 4. Если есть initData, пробуем безопасную проверку через Edge Function
+  if (initData) {
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-telegram`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initData })
+        }
+      );
+
+      const data = await response.json();
+
+      // Если пользователь найден в БД через безопасную проверку
+      if (data.success && data.role) {
+        return {
+          success: true,
+          telegram_id: data.telegram_id,
+          role: data.role,
+          full_name: data.full_name,
+          balance: data.balance,
+          user_id: data.user_id,
+          is_new: data.is_new,
+          language: data.language,
+          google_doc_url: data.google_doc_url
+        };
+      }
+    } catch (err) {
+      console.error("Ошибка проверки initData:", err);
+      // Продолжаем выполнение, полагаясь на базу данных и initDataUnsafe
     }
-  );
-
-  const data = await response.json();
-  
-  // Если пользователь не найден в БД (success: false), мы создадим его ниже
-  if (!data.success && data.message !== "User not found in database") {
-      throw new Error(data.error || "Ошибка авторизации");
   }
 
-  // Если пользователь найден в БД (data.success === true)
-  if (data.success && data.role) {
+  // 5. ПРОВЕРКА В БД И АВТО-РЕГИСТРАЦИЯ (универсальный путь)
+  const { data: existingUser, error: fetchError } = await supabase
+    .from('tutor_profiles')
+    .select('*')
+    .eq('telegram_id', telegramId)
+    .single();
+
+  // Если пользователь найден в БД
+  if (existingUser) {
     return {
       success: true,
-      telegram_id: data.telegram_id,
-      role: data.role,
-      full_name: data.full_name,
-      balance: data.balance,
-      user_id: data.user_id,
-      is_new: data.is_new,
-      language: data.language,
-      google_doc_url: data.google_doc_url
+      ...existingUser,
+      telegram_id: telegramId,
+      user_id: existingUser.id
     };
   }
 
-  // === АВТО-РЕГИСТРАЦИЯ ===
-  // Если пользователя нет в БД (data.success === false && data.message === "User not found...")
-  // Парсим initData для получения реального имени
-  const telegramUser = parseTelegramInitData(initData);
-  const fullName = telegramUser 
-    ? `${telegramUser.first_name || ''} ${telegramUser.last_name || ''}`.trim() || 'Ученик'
-    : 'Ученик';
-
-  // Создаём нового пользователя
+  // 6. Создаём нового пользователя (Авто-регистрация)
   const { data: newUser, error: insertError } = await supabase
     .from('tutor_profiles')
     .insert([{
-      telegram_id: data.telegram_id || telegramUser?.id?.toString(),
+      telegram_id: telegramId,
       full_name: fullName,
       role: 'student',
       balance: 0,
@@ -115,7 +133,7 @@ export async function authenticateUser() {
   return {
     success: true,
     ...newUser,
-    telegram_id: newUser.telegram_id,
+    telegram_id: telegramId,
     user_id: newUser.id
   };
 }
