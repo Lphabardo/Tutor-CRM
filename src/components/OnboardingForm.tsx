@@ -23,13 +23,17 @@ export default function OnboardingForm({ userId, onComplete }: OnboardingFormPro
     setLoading(true);
 
     const fullName = `${firstName} ${lastName}`.trim();
+    
+    // Магия: автоматически определяем часовой пояс устройства пользователя
+    const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
     const { error } = await supabase
       .from('tutor_profiles')
       .update({
         full_name: fullName,
         language: language,
-        is_new: false
+        is_new: false,
+        timezone: userTimezone // <-- Сохраняем часовой пояс
       })
       .eq('id', userId);
 
