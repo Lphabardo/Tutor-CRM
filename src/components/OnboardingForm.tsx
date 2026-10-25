@@ -83,9 +83,6 @@ export default function OnboardingForm({ userId, onComplete }: OnboardingFormPro
               <option value="">Выбери язык</option>
               <option value="Английский">Английский</option>
               <option value="Немецкий">Немецкий</option>
-              <option value="Испанский">Испанский</option>
-              <option value="Французский">Французский</option>
-              <option value="Другой">Другой</option>
             </select>
           </div>
 
