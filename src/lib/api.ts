@@ -1,8 +1,7 @@
 import { supabase } from './supabase';
 
-const isTelegram = typeof window !== 'undefined' && 
-                   (window as any).Telegram?.WebApp?.initData;
-const WebApp = isTelegram ? (window as any).Telegram.WebApp : null;
+// Упрощенная проверка: просто смотрим, есть ли объект Telegram.WebApp
+const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
 
 // Парсинг initData Telegram для получения имени пользователя
 function parseTelegramInitData(initData: string) {
@@ -34,10 +33,29 @@ export async function authenticateUser() {
     };
   }
 
-  const initData = WebApp.initData;
-  if (!initData) throw new Error("Нет данных инициализации Telegram");
+  // Инициализируем WebApp (расширяем на весь экран)
+  WebApp.ready();
+  WebApp.expand();
 
-  // Получаем данные пользователя из Telegram
+  // Получаем initData (может быть в initData или initDataUnsafe)
+  const initData = WebApp.initData;
+  
+  // Если initData нет, пробуем получить данные из initDataUnsafe (менее безопасно, но работает)
+  if (!initData && WebApp.initDataUnsafe) {
+    const user = WebApp.initDataUnsafe.user;
+    if (user) {
+       // Если initData нет, но есть пользователь, создаем заглушку для запроса
+       // Но лучше все же использовать verify-telegram с initData, поэтому пробуем получить initData еще раз
+       // Если совсем ничего нет, кидаем ошибку
+       throw new Error("Не удалось получить данные авторизации Telegram. Попробуйте перезапустить приложение.");
+    }
+  }
+
+  if (!initData) {
+     throw new Error("Нет данных инициализации Telegram. Пожалуйста, откройте приложение через бота.");
+  }
+
+  // Получаем данные пользователя из Telegram (через нашу безопасную функцию)
   const response = await fetch(
     `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-telegram`,
     {
@@ -48,36 +66,40 @@ export async function authenticateUser() {
   );
 
   const data = await response.json();
-  if (!data.success) throw new Error(data.error || "Ошибка авторизации");
+  
+  // Если пользователь не найден в БД (success: false), мы создадим его ниже
+  if (!data.success && data.message !== "User not found in database") {
+      throw new Error(data.error || "Ошибка авторизации");
+  }
 
+  // Если пользователь найден в БД (data.success === true)
+  if (data.success && data.role) {
+    return {
+      success: true,
+      telegram_id: data.telegram_id,
+      role: data.role,
+      full_name: data.full_name,
+      balance: data.balance,
+      user_id: data.user_id,
+      is_new: data.is_new,
+      language: data.language,
+      google_doc_url: data.google_doc_url
+    };
+  }
+
+  // === АВТО-РЕГИСТРАЦИЯ ===
+  // Если пользователя нет в БД (data.success === false && data.message === "User not found...")
   // Парсим initData для получения реального имени
   const telegramUser = parseTelegramInitData(initData);
   const fullName = telegramUser 
     ? `${telegramUser.first_name || ''} ${telegramUser.last_name || ''}`.trim() || 'Ученик'
     : 'Ученик';
 
-  // Проверяем, есть ли пользователь уже в БД
-  const { data: existingUser, error: fetchError } = await supabase
-    .from('tutor_profiles')
-    .select('*')
-    .eq('telegram_id', data.telegram_id)
-    .single();
-
-  // Если пользователь найден — возвращаем ВСЕ его поля из БД
-  if (existingUser) {
-    return {
-      success: true,
-      ...existingUser,
-      telegram_id: data.telegram_id,
-      user_id: existingUser.id
-    };
-  }
-
-  // Если пользователя нет — создаём автоматически как ученика
+  // Создаём нового пользователя
   const { data: newUser, error: insertError } = await supabase
     .from('tutor_profiles')
     .insert([{
-      telegram_id: data.telegram_id,
+      telegram_id: data.telegram_id || telegramUser?.id?.toString(),
       full_name: fullName,
       role: 'student',
       balance: 0,
@@ -93,7 +115,7 @@ export async function authenticateUser() {
   return {
     success: true,
     ...newUser,
-    telegram_id: data.telegram_id,
+    telegram_id: newUser.telegram_id,
     user_id: newUser.id
   };
 }
