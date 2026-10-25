@@ -5,6 +5,16 @@ import OnboardingForm from './components/OnboardingForm';
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
 
 function App() {
+  // === ОТЛАДОЧНЫЕ ЛОГИ ===
+  useEffect(() => {
+    console.log("=== ПРОВЕРКА TELEGRAM ===");
+    console.log("1. window.Telegram:", (window as any).Telegram);
+    console.log("2. window.Telegram?.WebApp:", (window as any).Telegram?.WebApp);
+    console.log("3. initData:", (window as any).Telegram?.WebApp?.initData ? "ЕСТЬ" : "ОТСУТСТВУЕТ");
+    console.log("========================");
+  }, []);
+  // ======================
+
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
