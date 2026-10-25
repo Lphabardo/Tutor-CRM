@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson } from './lib/api';
+import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson } from './lib/api';
+import OnboardingForm from './components/OnboardingForm';
 
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
 
@@ -21,8 +22,18 @@ function App() {
       .finally(() => setLoading(false));
   }, []);
 
+  const handleOnboardingComplete = () => {
+    if (user) {
+      setUser({ ...user, is_new: false });
+    }
+  };
+
   if (loading) return <div className="p-6 text-center text-gray-500">Загрузка...</div>;
   if (error) return <div className="p-6 text-center text-red-500"><p className="text-lg font-bold mb-2">Ошибка</p><p>{error}</p></div>;
+
+  if (user?.is_new) {
+    return <OnboardingForm userId={user.id} onComplete={handleOnboardingComplete} />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -30,13 +41,14 @@ function App() {
         <h1 className="text-xl font-bold">Привет, {user.full_name}! 👋</h1>
         <p className="text-sm text-gray-500 mt-1">
           {user.role === 'tutor' ? '👨‍🏫 Преподаватель' : '👨‍🎓 Ученик'} | ID: {user.telegram_id}
+          {user.language && ` | Язык: ${user.language}`}
         </p>
       </div>
 
       {user.role === 'tutor' ? (
         <TutorDashboard activeTab={activeTab} setActiveTab={setActiveTab} />
       ) : (
-        <StudentDashboard telegramId={user.telegram_id} />
+        <StudentDashboard telegramId={user.telegram_id} user={user} />
       )}
     </div>
   );
@@ -150,11 +162,14 @@ function StudentsTab() {
         <p className="text-center text-gray-500">Учеников пока нет</p>
       ) : (
         students.map(student => (
-          <div key={student.id} className="bg-white p-4 rounded-lg mb-3 shadow">
+          <div key={student.id} className={`bg-white p-4 rounded-lg mb-3 shadow ${student.is_new ? 'border-l-4 border-yellow-400' : ''}`}>
             <div className="flex justify-between items-start mb-2">
               <div>
-                <h3 className="font-bold text-lg">{student.full_name}</h3>
-                <p className="text-sm text-gray-500">ID: {student.telegram_id}</p>
+                <h3 className="font-bold text-lg">
+                  {student.full_name}
+                  {student.is_new && <span className="ml-2 text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">Новый</span>}
+                </h3>
+                <p className="text-sm text-gray-500">ID: {student.telegram_id} {student.language && `| Язык: ${student.language}`}</p>
               </div>
               <div className="text-right">
                 <p className="text-2xl font-bold text-blue-600">{student.balance}</p>
@@ -231,11 +246,9 @@ function LessonsTab() {
     }
   };
 
-  // === ОБНОВЛЕННАЯ ФУНКЦИЯ ОТМЕНЫ ===
   const handleCancel = async (lessonId: string) => {
     if (!confirm('Вы уверены, что хотите отменить этот урок?')) return;
     
-    // Спрашиваем про уважительную причину
     const hasValidReason = confirm(
       'Есть ли уважительная причина отмены (болезнь, ЧП)?\n\n' +
       'Нажмите ОК = Да, причина уважительная (без списания/компенсации)\n' +
@@ -243,7 +256,6 @@ function LessonsTab() {
     );
     
     try {
-      // Передаем роль 'tutor', так как отменяет преподаватель
       const result = await cancelLesson(lessonId, hasValidReason, 'tutor');
       
       if (result === 'canceled_free_with_compensation') {
@@ -374,19 +386,154 @@ function LessonsTab() {
 }
 
 // === ПАНЕЛЬ УЧЕНИКА ===
-function StudentDashboard({ telegramId }: { telegramId: string }) {
+function StudentDashboard({ telegramId, user }: { telegramId: string, user: any }) {
+  const [nextLesson, setNextLesson] = useState<any>(null);
+  const [timeLeft, setTimeLeft] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchNextLesson = async () => {
+      try {
+        const lesson = await getMyNextLesson(telegramId);
+        setNextLesson(lesson);
+      } catch (err) {
+        console.error('Ошибка загрузки урока:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchNextLesson();
+  }, [telegramId]);
+
+  useEffect(() => {
+    if (!nextLesson) return;
+
+    const updateTimer = () => {
+      const now = new Date().getTime();
+      const lessonTime = new Date(nextLesson.start_time).getTime();
+      const difference = lessonTime - now;
+
+      if (difference <= 0) {
+        setTimeLeft('Урок начался или уже прошёл!');
+        return;
+      }
+
+      const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((difference % (1000 * 60)) / 1000);
+
+      setTimeLeft(
+        `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+      );
+    };
+
+    updateTimer();
+    const timerId = setInterval(updateTimer, 1000);
+
+    return () => clearInterval(timerId);
+  }, [nextLesson]);
+
+  const handleCancelLesson = async () => {
+    if (!nextLesson) return;
+    if (!confirm('Вы уверены, что хотите отменить этот урок?')) return;
+
+    const hasValidReason = confirm(
+      'Есть ли уважительная причина отмены (болезнь, ЧП)?\n\n' +
+      'Нажмите ОК = Да, причина уважительная (бесплатно)\n' +
+      'Нажмите Отмена = Нет, обычная отмена (списание 1 урока с баланса)'
+    );
+
+    try {
+      const result = await cancelLesson(nextLesson.id, hasValidReason, 'student');
+      if (result === 'canceled_paid') {
+        alert('Урок отменен. С вашего баланса списан 1 урок.');
+      } else {
+        alert('Урок отменен бесплатно.');
+      }
+      setNextLesson(null);
+      setTimeLeft('');
+    } catch (err: any) {
+      alert('Ошибка: ' + err.message);
+    }
+  };
+
+  if (loading) return <div className="p-6 text-center">Загрузка кабинета...</div>;
+
   return (
-    <div className="p-4">
-      <div className="bg-white p-6 rounded-lg shadow mb-4">
-        <h2 className="text-xl font-bold mb-2">👨‍🎓 Кабинет ученика</h2>
-        <p className="text-gray-500">Здесь будет:</p>
-        <ul className="list-disc list-inside mt-2 text-gray-600">
-          <li>Ближайший урок с обратным отсчетом</li>
-          <li>Кнопка "Присоединиться к Meet"</li>
-          <li>Отмена/перенос урока (правило 3 часов)</li>
-          <li>Домашние задания</li>
+    <div className="p-4 space-y-4">
+      {/* Карточка ближайшего урока */}
+      <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-2xl shadow-lg">
+        <h2 className="text-lg font-semibold opacity-90 mb-1">⏰ Ближайший урок</h2>
+        
+        {nextLesson ? (
+          <>
+            <h3 className="text-2xl font-bold mb-2">{nextLesson.topic || 'Тема не указана'}</h3>
+            <p className="text-blue-100 mb-4">
+              {new Date(nextLesson.start_time).toLocaleString('ru-RU', { 
+                day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' 
+              })}
+            </p>
+            
+            <div className="bg-white/20 backdrop-blur-sm rounded-xl p-4 text-center mb-4">
+              <p className="text-sm opacity-80 mb-1">До начала осталось:</p>
+              <p className="text-4xl font-mono font-bold tracking-wider">{timeLeft}</p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <a 
+                href="https://meet.google.com/" 
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full bg-white text-blue-600 py-3 rounded-xl font-bold text-center shadow hover:bg-blue-50 transition"
+              >
+                🎥 Присоединиться к Google Meet
+              </a>
+              <button 
+                onClick={handleCancelLesson}
+                className="w-full bg-red-500/80 text-white py-3 rounded-xl font-semibold hover:bg-red-600 transition"
+              >
+                ❌ Отменить урок
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-4">
+            <p className="text-xl font-semibold mb-2">Уроков пока нет 🎉</p>
+            <p className="text-blue-100 text-sm">Преподаватель скоро назначит расписание</p>
+          </div>
+        )}
+      </div>
+
+      {/* Карточка материалов */}
+      <div className="bg-white p-6 rounded-xl shadow">
+        <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+          📚 Конспект и Домашнее задание
+        </h3>
+        {user.google_doc_url ? (
+          <a 
+            href={user.google_doc_url} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="block w-full bg-green-50 text-green-700 border border-green-200 py-3 rounded-lg font-semibold text-center hover:bg-green-100 transition"
+          >
+            Открыть Google Документ ↗
+          </a>
+        ) : (
+          <p className="text-gray-500 text-sm">Преподаватель пока не добавил ссылку на материалы.</p>
+        )}
+      </div>
+
+      {/* Карточка правил */}
+      <div className="bg-white p-6 rounded-xl shadow">
+        <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+          ⚖️ Правила обучения
+        </h3>
+        <ul className="text-sm text-gray-600 space-y-2 list-disc list-inside">
+          <li>Отмена урока возможна бесплатно за <b>3+ часа</b> до начала.</li>
+          <li>При отмене менее чем за 3 часа без уважительной причины списывается <b>1 урок</b>.</li>
+          <li>При болезни или ЧП (уважительная причина) урок отменяется бесплатно в любое время.</li>
+          <li>Оплата производится до начала цикла занятий.</li>
         </ul>
-        <p className="text-sm text-yellow-600 mt-4">⚠️ Эта часть будет добавлена на следующем этапе</p>
       </div>
     </div>
   );

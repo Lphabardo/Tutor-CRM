@@ -4,8 +4,22 @@ const isTelegram = typeof window !== 'undefined' &&
                    (window as any).Telegram?.WebApp?.initData;
 const WebApp = isTelegram ? (window as any).Telegram.WebApp : null;
 
-// Авторизация пользователя
+// Парсинг initData Telegram для получения имени пользователя
+function parseTelegramInitData(initData: string) {
+  const params = new URLSearchParams(initData);
+  const userStr = params.get('user');
+  if (!userStr) return null;
+  
+  try {
+    return JSON.parse(decodeURIComponent(userStr));
+  } catch {
+    return null;
+  }
+}
+
+// Авторизация пользователя с авто-регистрацией
 export async function authenticateUser() {
+  // Режим тестирования (в браузере без Telegram)
   if (!WebApp) {
     return {
       success: true,
@@ -13,13 +27,17 @@ export async function authenticateUser() {
       role: 'tutor',
       full_name: 'Преподаватель',
       balance: 0,
-      user_id: 'test-user-id'
+      user_id: 'test-user-id',
+      is_new: false,
+      language: null,
+      google_doc_url: null
     };
   }
 
   const initData = WebApp.initData;
   if (!initData) throw new Error("Нет данных инициализации Telegram");
 
+  // Получаем данные пользователя из Telegram
   const response = await fetch(
     `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-telegram`,
     {
@@ -31,7 +49,53 @@ export async function authenticateUser() {
 
   const data = await response.json();
   if (!data.success) throw new Error(data.error || "Ошибка авторизации");
-  return data;
+
+  // Парсим initData для получения реального имени
+  const telegramUser = parseTelegramInitData(initData);
+  const fullName = telegramUser 
+    ? `${telegramUser.first_name || ''} ${telegramUser.last_name || ''}`.trim() || 'Ученик'
+    : 'Ученик';
+
+  // Проверяем, есть ли пользователь уже в БД
+  const { data: existingUser, error: fetchError } = await supabase
+    .from('tutor_profiles')
+    .select('*')
+    .eq('telegram_id', data.telegram_id)
+    .single();
+
+  // Если пользователь найден — возвращаем ВСЕ его поля из БД
+  if (existingUser) {
+    return {
+      success: true,
+      ...existingUser,
+      telegram_id: data.telegram_id,
+      user_id: existingUser.id
+    };
+  }
+
+  // Если пользователя нет — создаём автоматически как ученика
+  const { data: newUser, error: insertError } = await supabase
+    .from('tutor_profiles')
+    .insert([{
+      telegram_id: data.telegram_id,
+      full_name: fullName,
+      role: 'student',
+      balance: 0,
+      is_new: true,
+      language: null,
+      google_doc_url: null
+    }])
+    .select()
+    .single();
+
+  if (insertError) throw insertError;
+
+  return {
+    success: true,
+    ...newUser,
+    telegram_id: data.telegram_id,
+    user_id: newUser.id
+  };
 }
 
 // === ФУНКЦИИ ДЛЯ ПРЕПОДАВАТЕЛЯ ===
@@ -51,7 +115,7 @@ export async function getStudents() {
 export async function addStudent(telegramId: number, fullName: string) {
   const { data, error } = await supabase
     .from('tutor_profiles')
-    .insert([{ telegram_id: telegramId, full_name: fullName, role: 'student', balance: 0 }])
+    .insert([{ telegram_id: telegramId, full_name: fullName, role: 'student', balance: 0, is_new: true }])
     .select()
     .single();
   if (error) throw error;
@@ -85,7 +149,7 @@ export async function getAllLessons() {
     .from('tutor_lessons')
     .select(`
       *,
-      student:tutor_profiles(full_name, telegram_id)
+      student:tutor_profiles(full_name, telegram_id, language)
     `)
     .order('start_time', { ascending: true });
   if (error) throw error;
@@ -93,7 +157,6 @@ export async function getAllLessons() {
 }
 
 // Отменить урок (с правилом 3 часов и уважительной причиной)
-// canceledBy: 'student' или 'tutor'
 export async function cancelLesson(
   lessonId: string, 
   hasValidReason: boolean = false,
@@ -119,16 +182,49 @@ export async function completeLesson(lessonId: string, topic: string) {
 
 // === ФУНКЦИИ ДЛЯ УЧЕНИКА ===
 
-// Получить мои уроки
-export async function getMyLessons(telegramId: string) {
+// Получить ближайший запланированный урок ученика
+export async function getMyNextLesson(telegramId: string) {
+  const { data: profile, error: profileError } = await supabase
+    .from('tutor_profiles')
+    .select('id')
+    .eq('telegram_id', telegramId)
+    .eq('role', 'student')
+    .single();
+  
+  if (profileError || !profile) return null;
+
   const { data, error } = await supabase
     .from('tutor_lessons')
     .select('*')
-    .eq('student_id', (await supabase
-      .from('tutor_profiles')
-      .select('id')
-      .eq('telegram_id', telegramId)
-      .single()).data?.id)
+    .eq('student_id', profile.id)
+    .eq('status', 'scheduled')
+    .gte('start_time', new Date().toISOString())
+    .order('start_time', { ascending: true })
+    .limit(1)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null; // Уроков нет — это нормально
+    throw error;
+  }
+  
+  return data;
+}
+
+// Получить мои уроки
+export async function getMyLessons(telegramId: string) {
+  const { data: profile } = await supabase
+    .from('tutor_profiles')
+    .select('id')
+    .eq('telegram_id', telegramId)
+    .single();
+
+  if (!profile) return [];
+
+  const { data, error } = await supabase
+    .from('tutor_lessons')
+    .select('*')
+    .eq('student_id', profile.id)
     .order('start_time', { ascending: true });
   if (error) throw error;
   return data;
@@ -136,17 +232,21 @@ export async function getMyLessons(telegramId: string) {
 
 // Получить мои домашние задания
 export async function getMyHomeworks(telegramId: string) {
+  const { data: profile } = await supabase
+    .from('tutor_profiles')
+    .select('id')
+    .eq('telegram_id', telegramId)
+    .single();
+
+  if (!profile) return [];
+
   const { data, error } = await supabase
     .from('tutor_homeworks')
     .select(`
       *,
       lesson:tutor_lessons(start_time, topic)
     `)
-    .eq('lesson.student_id', (await supabase
-      .from('tutor_profiles')
-      .select('id')
-      .eq('telegram_id', telegramId)
-      .single()).data?.id)
+    .eq('lesson.student_id', profile.id)
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data;
