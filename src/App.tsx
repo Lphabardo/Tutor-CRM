@@ -29,7 +29,7 @@ function App() {
       <div className="bg-white p-4 shadow-sm">
         <h1 className="text-xl font-bold">Привет, {user.full_name}! 👋</h1>
         <p className="text-sm text-gray-500 mt-1">
-          {user.role === 'tutor' ? '👨‍ Преподаватель' : '👨‍🎓 Ученик'} | ID: {user.telegram_id}
+          {user.role === 'tutor' ? '👨‍🏫 Преподаватель' : '👨‍🎓 Ученик'} | ID: {user.telegram_id}
         </p>
       </div>
 
@@ -231,11 +231,27 @@ function LessonsTab() {
     }
   };
 
+  // === ОБНОВЛЕННАЯ ФУНКЦИЯ ОТМЕНЫ ===
   const handleCancel = async (lessonId: string) => {
-    if (!confirm('Отменить урок?')) return;
+    if (!confirm('Вы уверены, что хотите отменить этот урок?')) return;
+    
+    // Спрашиваем про уважительную причину
+    const hasValidReason = confirm(
+      'Есть ли уважительная причина отмены (болезнь, ЧП)?\n\n' +
+      'Нажмите ОК = Да, причина уважительная (без списания/компенсации)\n' +
+      'Нажмите Отмена = Нет, обычная отмена (ученик получит компенсацию +1 урок)'
+    );
+    
     try {
-      const result = await cancelLesson(lessonId);
-      alert(result === 'canceled_paid' ? 'Урок отменен со списанием баланса' : 'Урок отменен бесплатно');
+      // Передаем роль 'tutor', так как отменяет преподаватель
+      const result = await cancelLesson(lessonId, hasValidReason, 'tutor');
+      
+      if (result === 'canceled_free_with_compensation') {
+        alert('Урок отменен. Ученику автоматически начислен 1 бесплатный урок в качестве компенсации.');
+      } else {
+        alert('Урок отменен бесплатно (уважительная причина или отмена за 3+ часа).');
+      }
+      
       await loadLessons();
     } catch (err: any) {
       alert('Ошибка: ' + err.message);
@@ -256,7 +272,7 @@ function LessonsTab() {
 
   const getStatusText = (status: string) => {
     const map: any = {
-      'scheduled': ' Запланирован',
+      'scheduled': '🕒 Запланирован',
       'completed': '✅ Проведен',
       'canceled_free': '❌ Отменен (бесплатно)',
       'canceled_paid': '❌ Отменен (списан)'

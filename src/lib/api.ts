@@ -92,10 +92,17 @@ export async function getAllLessons() {
   return data;
 }
 
-// Отменить урок (с правилом 3 часов на сервере)
-export async function cancelLesson(lessonId: string) {
+// Отменить урок (с правилом 3 часов и уважительной причиной)
+// canceledBy: 'student' или 'tutor'
+export async function cancelLesson(
+  lessonId: string, 
+  hasValidReason: boolean = false,
+  canceledBy: 'student' | 'tutor' = 'student'
+) {
   const { data, error } = await supabase.rpc('rpc_cancel_lesson', { 
-    p_lesson_id: lessonId 
+    p_lesson_id: lessonId,
+    p_has_valid_reason: hasValidReason,
+    p_canceled_by: canceledBy
   });
   if (error) throw error;
   return data;
