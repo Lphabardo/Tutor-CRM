@@ -1,5 +1,9 @@
 import { supabase } from './supabase';
 
+// ТВОЙ БОТ ТОКЕН (Для отправки отзывов)
+const BOT_TOKEN = "8930796552:AAGaXKS89TcPsz7vrkZeSQbWxwYL18gSry0";
+const TEACHER_CHAT_ID = "830672781";
+
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
 
 function parseTelegramInitData(initData: string) {
@@ -149,7 +153,6 @@ export async function adjustBalance(studentId: string, amount: number, reason: s
   if (error) throw error;
 }
 
-// Обновление настроек ученика (Цена и Ссылка на Meet)
 export async function updateStudentSettings(studentId: string, settings: { price_per_lesson?: number, meet_link?: string, google_doc_url?: string }) {
   const { error } = await supabase
     .from('tutor_profiles')
@@ -158,18 +161,51 @@ export async function updateStudentSettings(studentId: string, settings: { price
   if (error) throw error;
 }
 
-// Создание урока с автоматическим подтягиванием ссылки на Meet из профиля ученика
-export async function createLesson(studentId: string, startTime: string, topic: string) {
-  // 1. Сначала узнаем ссылку на Meet у этого ученика
-  const { data: student } = await supabase
-    .from('tutor_profiles')
-    .select('meet_link')
-    .eq('id', studentId)
-    .single();
+// === НОВОЕ: Обновление правил преподавателя ===
+export async function updateTeacherRules(rulesText: string) {
+  // Обновляем правила у ВСЕХ учеников и преподавателя для синхронизации
+  // Но проще обновить только у преподавателя, а ученики будут читать оттуда
+  // В рамках текущей логики обновим у текущего юзера (преподавателя)
+  // И также обновим глобальную настройку, если бы она была.
+  // Сейчас просто обновим запись преподавателя.
+  const { data: tutor } = await supabase.from('tutor_profiles').select('id').eq('role', 'tutor').single();
+  
+  if (tutor) {
+     await supabase.from('tutor_profiles').update({ rules_text: rulesText }).eq('id', tutor.id);
+  }
+  
+  // Также обновим у всех студентов, чтобы они видели изменения сразу при входе
+  await supabase.from('tutor_profiles').update({ rules_text: rulesText }).eq('role', 'student');
+}
 
+// === НОВОЕ: Получение отзывов ===
+export async function getFeedbacks() {
+  const { data, error } = await supabase
+    .from('student_feedback')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+// === НОВОЕ: Отправка отзыва (в бот и в базу) ===
+export async function sendFeedback(studentName: string, message: string) {
+  // 1. Сохраняем в базу
+  await supabase.from('student_feedback').insert({ student_name: studentName, message });
+
+  // 2. Отправляем в Телеграм Преподавателю
+  const text = `💬 НОВЫЙ ОТЗЫВ!\n\nОт: ${studentName}\nСообщение:\n${message}`;
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: TEACHER_CHAT_ID, text })
+  });
+}
+
+export async function createLesson(studentId: string, startTime: string, topic: string) {
+  const { data: student } = await supabase.from('tutor_profiles').select('meet_link').eq('id', studentId).single();
   const meetLink = student?.meet_link || null;
 
-  // 2. Создаем урок с этой ссылкой
   const { data, error } = await supabase
     .from('tutor_lessons')
     .insert([{ 
@@ -177,7 +213,7 @@ export async function createLesson(studentId: string, startTime: string, topic: 
       start_time: startTime, 
       status: 'scheduled', 
       topic,
-      meet_link: meetLink // Сохраняем текущую ссылку в историю урока
+      meet_link: meetLink 
     }])
     .select()
     .single();
@@ -252,49 +288,25 @@ export async function getMyNextLesson(telegramId: string) {
 }
 
 export async function getMyLessons(telegramId: string) {
-  const { data: profile } = await supabase
-    .from('tutor_profiles')
-    .select('id')
-    .eq('telegram_id', telegramId)
-    .single();
+  const { data: profile } = await supabase.from('tutor_profiles').select('id').eq('telegram_id', telegramId).single();
   if (!profile) return [];
-  const { data, error } = await supabase
-    .from('tutor_lessons')
-    .select('*')
-    .eq('student_id', profile.id)
-    .order('start_time', { ascending: true });
+  const { data, error } = await supabase.from('tutor_lessons').select('*').eq('student_id', profile.id).order('start_time', { ascending: true });
   if (error) throw error;
   return data;
 }
 
 export async function getMyHomeworks(telegramId: string) {
-  const { data: profile } = await supabase
-    .from('tutor_profiles')
-    .select('id')
-    .eq('telegram_id', telegramId)
-    .single();
+  const { data: profile } = await supabase.from('tutor_profiles').select('id').eq('telegram_id', telegramId).single();
   if (!profile) return [];
-  const { data, error } = await supabase
-    .from('tutor_homeworks')
-    .select(`
-      *,
-      lesson:tutor_lessons(start_time, topic)
-    `)
-    .eq('lesson.student_id', profile.id)
-    .order('created_at', { ascending: false });
+  const { data, error } = await supabase.from('tutor_homeworks').select(`*, lesson:tutor_lessons(start_time, topic)`).eq('lesson.student_id', profile.id).order('created_at', { ascending: false });
   if (error) throw error;
   return data;
 }
 
-// === НОВАЯ ФУНКЦИЯ: Расчет заработка ===
 export async function calculateEarnings(startDate: string, endDate: string) {
-  // Ищем все уроки со статусом 'completed' в выбранном диапазоне
   const { data, error } = await supabase
     .from('tutor_lessons')
-    .select(`
-      *,
-      student:tutor_profiles(price_per_lesson, full_name)
-    `)
+    .select(`*, student:tutor_profiles(price_per_lesson, full_name)`)
     .eq('status', 'completed')
     .gte('start_time', startDate)
     .lte('start_time', endDate)
@@ -305,15 +317,10 @@ export async function calculateEarnings(startDate: string, endDate: string) {
   let totalSum = 0;
   const earningsDetails: any[] = [];
 
-  // Считаем сумму (берем цену на момент проведения или текущую - здесь берем текущую для простоты)
   data.forEach((lesson: any) => {
     const price = lesson.student?.price_per_lesson || 0;
     totalSum += price;
-    earningsDetails.push({
-      date: lesson.start_time,
-      studentName: lesson.student?.full_name,
-      price: price
-    });
+    earningsDetails.push({ date: lesson.start_time, studentName: lesson.student?.full_name, price: price });
   });
 
   return { totalSum, count: data.length, details: earningsDetails };

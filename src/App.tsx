@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent, calculateEarnings } from './lib/api';
+import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent, calculateEarnings, updateTeacherRules, getFeedbacks, sendFeedback } from './lib/api';
 import OnboardingForm from './components/OnboardingForm';
 
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
@@ -16,7 +16,7 @@ function App() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'students' | 'lessons' | 'finance'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'lessons' | 'finance' | 'settings'>('students');
 
   useEffect(() => {
     if (WebApp) {
@@ -47,7 +47,7 @@ function App() {
       <div className="bg-white p-4 shadow-sm">
         <h1 className="text-xl font-bold">Привет, {user.full_name}! 👋</h1>
         <p className="text-sm text-gray-500 mt-1">
-          {user.role === 'tutor' ? '👨‍🏫 Преподаватель' : '👨‍🎓 Ученик'} | ID: {user.telegram_id}
+          {user.role === 'tutor' ? '👨‍🏫 Преподаватель' : '👨‍ Ученик'} | ID: {user.telegram_id}
           {user.language && ` | Язык: ${user.language}`}
         </p>
       </div>
@@ -61,15 +61,16 @@ function App() {
   );
 }
 
-function TutorDashboard({ activeTab, setActiveTab }: { activeTab: 'students' | 'lessons' | 'finance', setActiveTab: (tab: 'students' | 'lessons' | 'finance') => void }) {
+function TutorDashboard({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: (tab: any) => void }) {
   return (
     <div>
-      <div className="flex border-b bg-white">
-        <button onClick={() => setActiveTab('students')} className={`flex-1 py-3 font-semibold text-sm ${activeTab === 'students' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>Ученики</button>
-        <button onClick={() => setActiveTab('lessons')} className={`flex-1 py-3 font-semibold text-sm ${activeTab === 'lessons' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>Расписание</button>
-        <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 font-semibold text-sm ${activeTab === 'finance' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500'}`}>💰 Финансы</button>
+      <div className="flex border-b bg-white overflow-x-auto">
+        <button onClick={() => setActiveTab('students')} className={`flex-1 py-3 font-semibold text-sm whitespace-nowrap ${activeTab === 'students' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>Ученики</button>
+        <button onClick={() => setActiveTab('lessons')} className={`flex-1 py-3 font-semibold text-sm whitespace-nowrap ${activeTab === 'lessons' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>Расписание</button>
+        <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 font-semibold text-sm whitespace-nowrap ${activeTab === 'finance' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500'}`}>💰 Финансы</button>
+        <button onClick={() => setActiveTab('settings')} className={`flex-1 py-3 font-semibold text-sm whitespace-nowrap ${activeTab === 'settings' ? 'text-purple-600 border-b-2 border-purple-600' : 'text-gray-500'}`}>⚙️ Настройки</button>
       </div>
-      {activeTab === 'students' ? <StudentsTab /> : activeTab === 'lessons' ? <LessonsTab /> : <FinanceTab />}
+      {activeTab === 'students' ? <StudentsTab /> : activeTab === 'lessons' ? <LessonsTab /> : activeTab === 'finance' ? <FinanceTab /> : <SettingsTab />}
     </div>
   );
 }
@@ -82,10 +83,7 @@ function StudentsTab() {
   const [newName, setNewName] = useState('');
 
   const loadStudents = async () => {
-    try {
-      const data = await getStudents();
-      setStudents(data);
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+    try { const data = await getStudents(); setStudents(data); } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
   useEffect(() => { loadStudents(); }, []);
@@ -101,37 +99,24 @@ function StudentsTab() {
   };
 
   const handleBalanceChange = async (studentId: string, amount: number, reason: string) => {
-    try {
-      await adjustBalance(studentId, amount, reason);
-      await loadStudents();
-    } catch (err: any) { alert('Ошибка: ' + err.message); }
+    try { await adjustBalance(studentId, amount, reason); await loadStudents(); } catch (err: any) { alert('Ошибка: ' + err.message); }
   };
 
   const handleDeleteStudent = async (studentId: string, studentName: string) => {
-    if (!confirm(`Вы уверены, что хотите удалить ученика "${studentName}"?\nЭто действие нельзя отменить.`)) return;
-    try {
-      await deleteStudent(studentId);
-      await loadStudents();
-      alert('Ученик удален');
-    } catch (err: any) { alert('Ошибка при удалении: ' + err.message); }
+    if (!confirm(`Вы уверены, что хотите удалить ученика "${studentName}"?`)) return;
+    try { await deleteStudent(studentId); await loadStudents(); alert('Ученик удален'); } catch (err: any) { alert('Ошибка: ' + err.message); }
   };
 
   const handleUpdateSettings = async (studentId: string, currentPrice: number, currentMeet: string, currentDoc: string) => {
     const newPrice = prompt(`Введите цену за урок (сейчас ${currentPrice}):`, String(currentPrice));
     if (newPrice === null) return;
-    
-    const newMeet = prompt(`Введите ссылку на Meet (сейчас ${currentMeet}):`, currentMeet);
+    const newMeet = prompt(`Введите ссылку на Meet:`, currentMeet);
     if (newMeet === null) return;
-
-    const newDoc = prompt(`Введите ссылку на Документ (сейчас ${currentDoc}):`, currentDoc);
+    const newDoc = prompt(`Введите ссылку на Документ:`, currentDoc);
     if (newDoc === null) return;
 
     try {
-      await updateStudentSettings(studentId, {
-        price_per_lesson: parseInt(newPrice) || 0,
-        meet_link: newMeet,
-        google_doc_url: newDoc
-      });
+      await updateStudentSettings(studentId, { price_per_lesson: parseInt(newPrice) || 0, meet_link: newMeet, google_doc_url: newDoc });
       await loadStudents();
       alert('Настройки сохранены!');
     } catch (err: any) { alert('Ошибка: ' + err.message); }
@@ -149,15 +134,13 @@ function StudentsTab() {
           <button onClick={handleAddStudent} className="w-full bg-green-600 text-white py-2 rounded">Сохранить</button>
         </div>
       )}
-      {students.length === 0 ? (
-        <p className="text-center text-gray-500">Учеников пока нет</p>
-      ) : (
+      {students.length === 0 ? <p className="text-center text-gray-500">Учеников пока нет</p> : (
         students.map(student => (
           <div key={student.id} className={`bg-white p-4 rounded-lg mb-3 shadow ${student.is_new ? 'border-l-4 border-yellow-400' : ''}`}>
             <div className="flex justify-between items-start mb-2">
               <div>
-                <h3 className="font-bold text-lg">{student.full_name}{student.is_new && <span className="ml-2 text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">Новый</span>}</h3>
-                <p className="text-sm text-gray-500">ID: {student.telegram_id} {student.language && `| Язык: ${student.language}`}</p>
+                <h3 className="font-bold text-lg">{student.full_name}</h3>
+                <p className="text-sm text-gray-500">ID: {student.telegram_id}</p>
               </div>
               <div className="text-right">
                 <p className="text-2xl font-bold text-blue-600">{student.balance}</p>
@@ -165,13 +148,13 @@ function StudentsTab() {
               </div>
             </div>
             <div className="flex gap-2 mt-3 flex-wrap">
-              <button onClick={() => handleBalanceChange(student.id, 1, 'Пополнение баланса')} className="flex-1 bg-green-500 text-white py-2 rounded text-sm min-w-[60px]">+1 урок</button>
-              <button onClick={() => handleBalanceChange(student.id, -1, 'Списание урока')} className="flex-1 bg-red-500 text-white py-2 rounded text-sm min-w-[60px]">-1 урок</button>
-              <button onClick={() => handleBalanceChange(student.id, 5, 'Пакет из 5 уроков')} className="flex-1 bg-blue-500 text-white py-2 rounded text-sm min-w-[60px]">+5 уроков</button>
-              <button onClick={() => handleDeleteStudent(student.id, student.full_name)} className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm min-w-[60px] border border-red-200 hover:bg-red-50"></button>
+              <button onClick={() => handleBalanceChange(student.id, 1, 'Пополнение')} className="flex-1 bg-green-500 text-white py-2 rounded text-sm">+1</button>
+              <button onClick={() => handleBalanceChange(student.id, -1, 'Списание')} className="flex-1 bg-red-500 text-white py-2 rounded text-sm">-1</button>
+              <button onClick={() => handleBalanceChange(student.id, 5, 'Пакет')} className="flex-1 bg-blue-500 text-white py-2 rounded text-sm">+5</button>
+              <button onClick={() => handleDeleteStudent(student.id, student.full_name)} className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm border border-red-200">🗑</button>
             </div>
-            <div className="mt-3 pt-3 border-t border-gray-100 flex gap-2">
-              <button onClick={() => handleUpdateSettings(student.id, student.price_per_lesson, student.meet_link, student.google_doc_url)} className="w-full bg-purple-50 text-purple-700 py-2 rounded text-xs border border-purple-200">⚙️ Настройки (Цена/Meet)</button>
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <button onClick={() => handleUpdateSettings(student.id, student.price_per_lesson, student.meet_link, student.google_doc_url)} className="w-full bg-purple-50 text-purple-700 py-2 rounded text-xs border border-purple-200">️ Настройки (Цена/Meet)</button>
             </div>
           </div>
         ))
@@ -194,8 +177,7 @@ function LessonsTab() {
   const loadLessons = async () => {
     try {
       const [lessonsData, studentsData] = await Promise.all([getAllLessons(), getStudents()]);
-      setLessons(lessonsData);
-      setStudents(studentsData);
+      setLessons(lessonsData); setStudents(studentsData);
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
@@ -204,22 +186,20 @@ function LessonsTab() {
   const handleCreateLesson = async () => {
     if (!selectedStudent || !lessonDate || !lessonTime) return;
     try {
-      const startTime = new Date(`${lessonDate}T${lessonTime}:00`).toISOString();
-      await createLesson(selectedStudent, startTime, lessonTopic);
-      setLessonDate(''); setLessonTime(''); setLessonTopic('');
-      setSelectedStudent(''); setShowAddForm(false);
+      await createLesson(selectedStudent, new Date(`${lessonDate}T${lessonTime}:00`).toISOString(), lessonTopic);
+      setLessonDate(''); setLessonTime(''); setLessonTopic(''); setSelectedStudent(''); setShowAddForm(false);
       await loadLessons();
       alert('Урок создан!');
     } catch (err: any) { alert('Ошибка: ' + err.message); }
   };
 
   const handleCancel = async (lessonId: string) => {
-    if (!confirm('Вы уверены, что хотите отменить этот урок?')) return;
-    const hasValidReason = confirm('Есть ли уважительная причина отмены (болезнь, ЧП)?\n\nНажмите ОК = Да (бесплатно)\nНажмите Отмена = Нет (списание 1 урока)');
+    if (!confirm('Отменить урок?')) return;
+    const hasValidReason = confirm('Уважительная причина? (ОК=Да, Отмена=Нет)');
     try {
       const result = await cancelLesson(lessonId, hasValidReason, 'tutor');
-      if (result === 'canceled_free_with_compensation') alert('Урок отменен. Ученику начислен 1 бесплатный урок.');
-      else alert('Урок отменен бесплатно.');
+      if (result === 'canceled_free_with_compensation') alert('Отменено (компенсация +1).');
+      else alert('Отменено бесплатно.');
       await loadLessons();
     } catch (err: any) { alert('Ошибка: ' + err.message); }
   };
@@ -227,11 +207,7 @@ function LessonsTab() {
   const handleComplete = async (lessonId: string) => {
     const topic = prompt('Тема урока:');
     if (!topic) return;
-    try {
-      await completeLesson(lessonId, topic);
-      await loadLessons();
-      alert('Урок завершен!');
-    } catch (err: any) { alert('Ошибка: ' + err.message); }
+    try { await completeLesson(lessonId, topic); await loadLessons(); alert('Урок завершен!'); } catch (err: any) { alert('Ошибка: ' + err.message); }
   };
 
   const getStatusText = (status: string) => {
@@ -240,44 +216,38 @@ function LessonsTab() {
   };
 
   if (loading) return <div className="p-6 text-center">Загрузка...</div>;
-
   const filteredLessons = showHistory ? lessons : lessons.filter(l => l.status === 'scheduled');
 
   return (
     <div className="p-4">
       <div className="flex gap-2 mb-4">
-        <button onClick={() => setShowAddForm(!showAddForm)} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold">+ Назначить урок</button>
-        <button onClick={() => setShowHistory(!showHistory)} className={`px-4 py-3 rounded-lg font-medium border transition whitespace-nowrap ${showHistory ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>{showHistory ? 'Скрыть историю' : '📜 История'}</button>
+        <button onClick={() => setShowAddForm(!showAddForm)} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold">+ Урок</button>
+        <button onClick={() => setShowHistory(!showHistory)} className="px-4 py-3 rounded-lg border bg-white">{showHistory ? 'Скрыть' : '📜 История'}</button>
       </div>
       {showAddForm && (
         <div className="bg-white p-4 rounded-lg mb-4 shadow">
-          <select value={selectedStudent} onChange={(e) => setSelectedStudent(e.target.value)} className="w-full p-2 border rounded mb-2">
-            <option value="">Выберите ученика</option>
-            {students.map(s => (<option key={s.id} value={s.id}>{s.full_name}</option>))}
-          </select>
+          <select value={selectedStudent} onChange={(e) => setSelectedStudent(e.target.value)} className="w-full p-2 border rounded mb-2"><option value="">Ученик</option>{students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}</select>
           <input type="date" value={lessonDate} onChange={(e) => setLessonDate(e.target.value)} className="w-full p-2 border rounded mb-2" />
           <input type="time" value={lessonTime} onChange={(e) => setLessonTime(e.target.value)} className="w-full p-2 border rounded mb-2" />
-          <input type="text" placeholder="Тема урока (необязательно)" value={lessonTopic} onChange={(e) => setLessonTopic(e.target.value)} className="w-full p-2 border rounded mb-2" />
-          <button onClick={handleCreateLesson} className="w-full bg-green-600 text-white py-2 rounded">Создать урок</button>
+          <input type="text" placeholder="Тема" value={lessonTopic} onChange={(e) => setLessonTopic(e.target.value)} className="w-full p-2 border rounded mb-2" />
+          <button onClick={handleCreateLesson} className="w-full bg-green-600 text-white py-2 rounded">Создать</button>
         </div>
       )}
-      {filteredLessons.length === 0 ? (
-        <p className="text-center text-gray-500 py-8">{showHistory ? 'История уроков пуста' : 'Запланированных уроков пока нет 🎉'}</p>
-      ) : (
+      {filteredLessons.length === 0 ? <p className="text-center text-gray-500 py-8">Пусто</p> : (
         filteredLessons.map(lesson => (
           <div key={lesson.id} className="bg-white p-4 rounded-lg mb-3 shadow">
             <div className="flex justify-between items-start mb-2">
               <div>
-                <h3 className="font-bold">{lesson.student?.full_name || 'Ученик'}</h3>
-                <p className="text-sm text-gray-500">{new Date(lesson.start_time).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                <h3 className="font-bold">{lesson.student?.full_name}</h3>
+                <p className="text-sm text-gray-500">{new Date(lesson.start_time).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
                 {lesson.topic && <p className="text-sm mt-1">📚 {lesson.topic}</p>}
               </div>
               <span className="text-sm font-semibold">{getStatusText(lesson.status)}</span>
             </div>
             {lesson.status === 'scheduled' && (
               <div className="flex gap-2 mt-3">
-                <button onClick={() => handleComplete(lesson.id)} className="flex-1 bg-green-500 text-white py-2 rounded text-sm">✅ Проведен</button>
-                <button onClick={() => handleCancel(lesson.id)} className="flex-1 bg-red-500 text-white py-2 rounded text-sm">❌ Отменить</button>
+                <button onClick={() => handleComplete(lesson.id)} className="flex-1 bg-green-500 text-white py-2 rounded text-sm">✅</button>
+                <button onClick={() => handleCancel(lesson.id)} className="flex-1 bg-red-500 text-white py-2 rounded text-sm"></button>
               </div>
             )}
           </div>
@@ -296,44 +266,101 @@ function FinanceTab() {
   const handleCalculate = async () => {
     setLoading(true);
     try {
-      // Добавляем время к дате, чтобы захватить весь день конца периода
-      const endDateTime = new Date(endDate).toISOString(); 
-      const startDateTime = new Date(startDate).toISOString();
-      const data = await calculateEarnings(startDateTime, endDateTime);
+      const data = await calculateEarnings(new Date(startDate).toISOString(), new Date(endDate).toISOString());
       setResult({ totalSum: data.totalSum, count: data.count });
-    } catch (err) {
-      alert('Ошибка расчета');
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { alert('Ошибка'); } finally { setLoading(false); }
   };
 
   return (
     <div className="p-4 space-y-6">
       <div className="bg-white p-6 rounded-xl shadow">
-        <h3 className="font-bold text-lg mb-4"> Калькулятор заработка</h3>
+        <h3 className="font-bold text-lg mb-4">💰 Калькулятор</h3>
         <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Дата начала</label>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full p-2 border rounded" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Дата конца</label>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full p-2 border rounded" />
-          </div>
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full p-2 border rounded" />
+          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full p-2 border rounded" />
         </div>
-        <button onClick={handleCalculate} disabled={loading} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700 disabled:bg-gray-400">
-          {loading ? 'Считаем...' : 'Рассчитать доход'}
-        </button>
+        <button onClick={handleCalculate} disabled={loading} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold">{loading ? '...' : 'Рассчитать'}</button>
       </div>
-
       {result && (
         <div className="bg-green-50 p-6 rounded-xl shadow border border-green-200 text-center">
-          <p className="text-gray-600 mb-1">Итого проведено уроков: {result.count}</p>
-          <p className="text-gray-600 mb-2">Ваш заработок за период:</p>
-          <p className="text-4xl font-bold text-green-700">{result.totalSum} ₽</p>
+          <p className="text-gray-600">Уроков: {result.count}</p>
+          <p className="text-4xl font-bold text-green-700 mt-2">{result.totalSum} ₽</p>
         </div>
       )}
+    </div>
+  );
+}
+
+// === НОВАЯ ВКЛАДКА НАСТРОЕК ===
+function SettingsTab() {
+  const [rules, setRules] = useState('');
+  const [feedbacks, setFeedbacks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      // Загружаем правила (берем от первого попавшегося ученика или преподавателя, они синхронизированы)
+      // Для простоты, загрузим профиль преподавателя
+      // Но у нас нет прямой функции getTutorProfile, поэтому используем хак: загрузим список учеников и возьмем правила оттуда,
+      // так как они копируются при updateTeacherRules.
+      const students = await getStudents();
+      if (students.length > 0 && students[0].rules_text) {
+        setRules(students[0].rules_text);
+      } else {
+        // Дефолтные правила если пусто
+        setRules(`Правила переноса и отмены занятий:
+1. Неявка без уведомления = урок проведен.
+2. Отмена < 3 часов = урок проведен.
+3. Отмена преподавателем = след. урок бесплатно.
+4. Уважительная причина = индивидуально.
+5. Отмена 1 раз в месяц.
+
+Оплата заранее пакетами.`);
+      }
+
+      const feedbacksData = await getFeedbacks();
+      setFeedbacks(feedbacksData);
+      setLoading(false);
+    };
+    loadData();
+  }, []);
+
+  const handleSaveRules = async () => {
+    try {
+      await updateTeacherRules(rules);
+      alert('Правила сохранены и обновлены у всех учеников!');
+    } catch (err: any) { alert('Ошибка: ' + err.message); }
+  };
+
+  if (loading) return <div className="p-6 text-center">Загрузка...</div>;
+
+  return (
+    <div className="p-4 space-y-6">
+      <div className="bg-white p-4 rounded-xl shadow">
+        <h3 className="font-bold text-lg mb-2">📜 Редактор Правил</h3>
+        <p className="text-xs text-gray-500 mb-2">Текст ниже увидят все ученики в разделе "Правила".</p>
+        <textarea 
+          value={rules} 
+          onChange={(e) => setRules(e.target.value)} 
+          className="w-full h-48 p-3 border rounded-lg text-sm font-mono"
+        />
+        <button onClick={handleSaveRules} className="w-full mt-2 bg-purple-600 text-white py-2 rounded-lg font-semibold">Сохранить правила</button>
+      </div>
+
+      <div className="bg-white p-4 rounded-xl shadow">
+        <h3 className="font-bold text-lg mb-4">💬 Отзывы от учеников</h3>
+        {feedbacks.length === 0 ? <p className="text-gray-500 text-sm">Пока нет отзывов</p> : (
+          feedbacks.map((f, i) => (
+            <div key={i} className="border-b border-gray-100 py-3 last:border-0">
+              <div className="flex justify-between text-xs text-gray-500 mb-1">
+                <span>От: {f.student_name}</span>
+                <span>{new Date(f.created_at).toLocaleDateString()}</span>
+              </div>
+              <p className="text-gray-800 text-sm">{f.message}</p>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -342,13 +369,11 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
   const [nextLesson, setNextLesson] = useState<any>(null);
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [rulesText, setRulesText] = useState(user.rules_text || "Загрузка правил...");
 
   useEffect(() => {
     const fetchNextLesson = async () => {
-      try {
-        const lesson = await getMyNextLesson(telegramId);
-        setNextLesson(lesson);
-      } catch (err) { console.error('Ошибка загрузки урока:', err); } finally { setLoading(false); }
+      try { const lesson = await getMyNextLesson(telegramId); setNextLesson(lesson); } catch (err) { console.error(err); } finally { setLoading(false); }
     };
     fetchNextLesson();
   }, [telegramId]);
@@ -356,97 +381,86 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
   useEffect(() => {
     if (!nextLesson) return;
     const updateTimer = () => {
-      const now = new Date().getTime();
-      const difference = new Date(nextLesson.start_time).getTime() - now;
-      if (difference <= 0) { setTimeLeft('Урок начался или уже прошёл!'); return; }
-      const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-      const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((difference % (1000 * 60)) / 1000);
-      setTimeLeft(`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+      const diff = new Date(nextLesson.start_time).getTime() - new Date().getTime();
+      if (diff <= 0) { setTimeLeft('Урок начался!'); return; }
+      const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const s = Math.floor((diff % (1000 * 60)) / 1000);
+      setTimeLeft(`${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`);
     };
     updateTimer();
-    const timerId = setInterval(updateTimer, 1000);
-    return () => clearInterval(timerId);
+    const t = setInterval(updateTimer, 1000);
+    return () => clearInterval(t);
   }, [nextLesson]);
 
   const handleCancelLesson = async () => {
     if (!nextLesson) return;
-    if (!confirm('Вы уверены, что хотите отменить этот урок?')) return;
-    const hasValidReason = confirm('Есть ли уважительная причина отмены (болезнь, ЧП)?\n\nНажмите ОК = Да (бесплатно)\nНажмите Отмена = Нет (списание 1 урока)');
+    if (!confirm('Отменить урок?')) return;
+    const hasValidReason = confirm('Уважительная причина? (ОК=Да)');
     try {
-      const result = await cancelLesson(nextLesson.id, hasValidReason, 'student');
-      if (result === 'canceled_paid') alert('Урок отменен. С вашего баланса списан 1 урок.');
-      else alert('Урок отменен бесплатно.');
+      const res = await cancelLesson(nextLesson.id, hasValidReason, 'student');
+      if (res === 'canceled_paid') alert('Списан 1 урок.');
+      else alert('Отменено бесплатно.');
       setNextLesson(null); setTimeLeft('');
     } catch (err: any) { alert('Ошибка: ' + err.message); }
   };
 
-  if (loading) return <div className="p-6 text-center">Загрузка кабинета...</div>;
+  const handleSendFeedback = async () => {
+    const msg = prompt("Напишите ваш отзыв или пожелание:");
+    if (!msg) return;
+    try {
+      await sendFeedback(user.full_name, msg);
+      alert("Отзыв отправлен преподавателю! 💬");
+    } catch (err) { alert("Ошибка отправки"); }
+  };
 
-  let balanceColorClass = 'border-blue-500';
-  let balanceTextClass = 'text-blue-600';
-  if (user.balance <= 2) { balanceColorClass = 'border-red-500 bg-red-50'; balanceTextClass = 'text-red-600'; } 
-  else if (user.balance <= 4) { balanceColorClass = 'border-yellow-500'; }
+  if (loading) return <div className="p-6 text-center">Загрузка...</div>;
+
+  let balClass = 'border-blue-500';
+  if (user.balance <= 2) balClass = 'border-red-500 bg-red-50';
+  else if (user.balance <= 4) balClass = 'border-yellow-500';
 
   return (
     <div className="p-4 space-y-4">
-      <div className={`bg-white p-4 rounded-xl shadow flex justify-between items-center border-l-4 ${balanceColorClass}`}>
-        <div>
-          <p className="text-sm text-gray-500">Ваш баланс</p>
-          <p className={`text-3xl font-bold ${balanceTextClass}`}>{user.balance || 0}</p>
-          <p className="text-xs text-gray-400 mt-1">уроков осталось</p>
-        </div>
-        <div className="text-4xl opacity-80">{user.balance <= 1 ? '💸' : '📚'}</div>
+      <div className={`bg-white p-4 rounded-xl shadow flex justify-between items-center border-l-4 ${balClass}`}>
+        <div><p className="text-sm text-gray-500">Баланс</p><p className="text-3xl font-bold">{user.balance}</p></div>
+        <div className="text-4xl">{user.balance <= 1 ? '' : '📚'}</div>
       </div>
 
       <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-2xl shadow-lg">
-        <h2 className="text-lg font-semibold opacity-90 mb-1">⏰ Ближайший урок</h2>
+        <h2 className="text-lg font-semibold mb-1">⏰ Ближайший урок</h2>
         {nextLesson ? (
           <>
-            <h3 className="text-2xl font-bold mb-2">{nextLesson.topic || 'Тема не указана'}</h3>
-            <p className="text-blue-100 mb-4">{new Date(nextLesson.start_time).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}</p>
-            <div className="bg-white/20 backdrop-blur-sm rounded-xl p-4 text-center mb-4">
-              <p className="text-sm opacity-80 mb-1">До начала осталось:</p>
-              <p className="text-4xl font-mono font-bold tracking-wider">{timeLeft}</p>
-            </div>
+            <h3 className="text-2xl font-bold mb-2">{nextLesson.topic || 'Без темы'}</h3>
+            <p className="text-blue-100">{new Date(nextLesson.start_time).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}</p>
+            <div className="bg-white/20 rounded-xl p-4 text-center my-4"><p className="text-4xl font-mono font-bold">{timeLeft}</p></div>
             <div className="flex flex-col gap-3">
               {nextLesson.meet_link ? (
-                <a href={nextLesson.meet_link} target="_blank" rel="noopener noreferrer" className="w-full bg-white text-blue-600 py-3 rounded-xl font-bold text-center shadow hover:bg-blue-50 transition">
-                  🎥 Присоединиться к Google Meet
-                </a>
+                <a href={nextLesson.meet_link} target="_blank" className="w-full bg-white text-blue-600 py-3 rounded-xl font-bold text-center">🎥 Войти в Meet</a>
               ) : (
-                <div className="w-full bg-gray-200 text-gray-500 py-3 rounded-xl font-bold text-center cursor-not-allowed">
-                  ⏳ Ссылка на урок появится перед началом
-                </div>
+                <div className="w-full bg-gray-200 text-gray-500 py-3 rounded-xl font-bold text-center">⏳ Ссылка появится перед уроком</div>
               )}
-              <button onClick={handleCancelLesson} className="w-full bg-red-500/80 text-white py-3 rounded-xl font-semibold hover:bg-red-600 transition">❌ Отменить урок</button>
+              <button onClick={handleCancelLesson} className="w-full bg-red-500/80 text-white py-3 rounded-xl font-semibold">❌ Отменить</button>
             </div>
           </>
         ) : (
-          <div className="text-center py-4">
-            <p className="text-xl font-semibold mb-2">Уроков пока нет 🎉</p>
-            <p className="text-blue-100 text-sm">Преподаватель скоро назначит расписание</p>
-          </div>
+          <div className="text-center py-4"><p className="text-xl font-bold">Нет уроков</p></div>
         )}
       </div>
 
       <div className="bg-white p-6 rounded-xl shadow">
-        <h3 className="font-bold text-lg mb-3 flex items-center gap-2">📚 Конспект и Домашнее задание</h3>
-        {user.google_doc_url ? (
-          <a href={user.google_doc_url} target="_blank" rel="noopener noreferrer" className="block w-full bg-green-50 text-green-700 border border-green-200 py-3 rounded-lg font-semibold text-center hover:bg-green-100 transition">Открыть Google Документ ↗</a>
-        ) : (
-          <p className="text-gray-500 text-sm">Преподаватель пока не добавил ссылку на материалы.</p>
-        )}
+        <h3 className="font-bold text-lg mb-3">📚 Материалы</h3>
+        {user.google_doc_url ? <a href={user.google_doc_url} target="_blank" className="block w-full bg-green-50 text-green-700 py-3 rounded-lg text-center font-semibold border border-green-200">Открыть Документ ↗</a> : <p className="text-gray-500 text-sm">Нет ссылки</p>}
       </div>
 
       <div className="bg-white p-6 rounded-xl shadow">
-        <h3 className="font-bold text-lg mb-3 flex items-center gap-2">⚖️ Правила обучения</h3>
-        <ul className="text-sm text-gray-600 space-y-2 list-disc list-inside">
-          <li>Отмена урока возможна бесплатно за <b>3+ часа</b> до начала.</li>
-          <li>При отмене менее чем за 3 часа без уважительной причины списывается <b>1 урок</b>.</li>
-          <li>При болезни или ЧП (уважительная причина) урок отменяется бесплатно в любое время.</li>
-          <li>Оплата производится до начала цикла занятий.</li>
-        </ul>
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-bold text-lg">⚖️ Правила</h3>
+          <button onClick={handleSendFeedback} className="bg-purple-100 text-purple-700 px-3 py-1 rounded text-xs font-bold">💬 Отзыв</button>
+        </div>
+        <div className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
+          {rulesText || "Правила не загружены"}
+        </div>
       </div>
     </div>
   );
