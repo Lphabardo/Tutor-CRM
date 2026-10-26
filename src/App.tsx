@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent, calculateEarnings, updateTeacherRules, getFeedbacks, sendFeedback } from './lib/api';
+import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent, calculateEarnings, updateTeacherRules, getFeedbacks, sendFeedback, generateRecurringLessons } from './lib/api';
 import OnboardingForm from './components/OnboardingForm';
 
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
@@ -83,7 +83,14 @@ function StudentsTab() {
   const [newName, setNewName] = useState('');
 
   const loadStudents = async () => {
-    try { const data = await getStudents(); setStudents(data); } catch (err) { console.error(err); } finally { setLoading(false); }
+    try { 
+      const data = await getStudents(); 
+      setStudents(data); 
+    } catch (err) { 
+      console.error(err); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   useEffect(() => { loadStudents(); }, []);
@@ -92,19 +99,34 @@ function StudentsTab() {
     if (!newTelegramId || !newName) return;
     try {
       await addStudent(parseInt(newTelegramId), newName);
-      setNewTelegramId(''); setNewName(''); setShowAddForm(false);
+      setNewTelegramId(''); 
+      setNewName(''); 
+      setShowAddForm(false);
       await loadStudents();
       alert('Ученик добавлен!');
-    } catch (err: any) { alert('Ошибка: ' + err.message); }
+    } catch (err: any) { 
+      alert('Ошибка: ' + err.message); 
+    }
   };
 
   const handleBalanceChange = async (studentId: string, amount: number, reason: string) => {
-    try { await adjustBalance(studentId, amount, reason); await loadStudents(); } catch (err: any) { alert('Ошибка: ' + err.message); }
+    try { 
+      await adjustBalance(studentId, amount, reason); 
+      await loadStudents(); 
+    } catch (err: any) { 
+      alert('Ошибка: ' + err.message); 
+    }
   };
 
   const handleDeleteStudent = async (studentId: string, studentName: string) => {
     if (!confirm(`Вы уверены, что хотите удалить ученика "${studentName}"?`)) return;
-    try { await deleteStudent(studentId); await loadStudents(); alert('Ученик удален'); } catch (err: any) { alert('Ошибка: ' + err.message); }
+    try { 
+      await deleteStudent(studentId); 
+      await loadStudents(); 
+      alert('Ученик удален'); 
+    } catch (err: any) { 
+      alert('Ошибка: ' + err.message); 
+    }
   };
 
   const handleUpdateSettings = async (studentId: string, currentPrice: number, currentMeet: string, currentDoc: string) => {
@@ -116,10 +138,45 @@ function StudentsTab() {
     if (newDoc === null) return;
 
     try {
-      await updateStudentSettings(studentId, { price_per_lesson: parseInt(newPrice) || 0, meet_link: newMeet, google_doc_url: newDoc });
+      await updateStudentSettings(studentId, { 
+        price_per_lesson: parseInt(newPrice) || 0, 
+        meet_link: newMeet, 
+        google_doc_url: newDoc 
+      });
       await loadStudents();
       alert('Настройки сохранены!');
-    } catch (err: any) { alert('Ошибка: ' + err.message); }
+    } catch (err: any) { 
+      alert('Ошибка: ' + err.message); 
+    }
+  };
+
+  // === НОВОЕ: Обновление расписания ===
+  const handleUpdateSchedule = async (studentId: string, currentSchedule: string) => {
+    const newSchedule = prompt("Формат: Пн 15:00, Ср 10:00", currentSchedule);
+    if (newSchedule === null) return;
+    try {
+      await updateStudentSettings(studentId, { fixed_schedule: newSchedule });
+      await loadStudents();
+      alert('Расписание сохранено!');
+    } catch (err: any) {
+      alert('Ошибка: ' + err.message);
+    }
+  };
+
+  // === НОВОЕ: Генерация уроков ===
+  const handleGenerateLessons = async (studentId: string) => {
+    const weeksStr = prompt("На сколько недель вперёд создать уроки?", "4");
+    if (!weeksStr) return;
+    const weeks = parseInt(weeksStr);
+    if (isNaN(weeks) || weeks < 1) return alert("Введите число >= 1");
+    
+    try {
+      const result = await generateRecurringLessons(studentId, weeks);
+      alert(result.message);
+      await loadStudents();
+    } catch (err: any) {
+      alert('Ошибка генерации: ' + err.message);
+    }
   };
 
   if (loading) return <div className="p-6 text-center">Загрузка...</div>;
@@ -153,9 +210,31 @@ function StudentsTab() {
               <button onClick={() => handleBalanceChange(student.id, 5, 'Пакет')} className="flex-1 bg-blue-500 text-white py-2 rounded text-sm">+5</button>
               <button onClick={() => handleDeleteStudent(student.id, student.full_name)} className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm border border-red-200">🗑</button>
             </div>
-            <div className="mt-3 pt-3 border-t border-gray-100">
-              <button onClick={() => handleUpdateSettings(student.id, student.price_per_lesson, student.meet_link, student.google_doc_url)} className="w-full bg-purple-50 text-purple-700 py-2 rounded text-xs border border-purple-200">️ Настройки (Цена/Meet)</button>
+            
+            {/* === НОВЫЕ КНОПКИ ДЛЯ РАСПИСАНИЯ === */}
+            <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-2">
+              <button 
+                onClick={() => handleUpdateSettings(student.id, student.price_per_lesson, student.meet_link, student.google_doc_url)} 
+                className="bg-purple-50 text-purple-700 py-2 rounded text-xs border border-purple-200"
+              >
+                ⚙️ Настройки
+              </button>
+              <button 
+                onClick={() => handleUpdateSchedule(student.id, student.fixed_schedule || '')} 
+                className="bg-orange-50 text-orange-700 py-2 rounded text-xs border border-orange-200"
+              >
+                📅 Расписание
+              </button>
             </div>
+            
+            {student.fixed_schedule && (
+              <button 
+                onClick={() => handleGenerateLessons(student.id)} 
+                className="w-full mt-2 bg-teal-50 text-teal-700 py-2 rounded text-xs border border-teal-200 font-medium hover:bg-teal-100 transition"
+              >
+                📅 Сгенерировать уроки на 4 недели →
+              </button>
+            )}
           </div>
         ))
       )}
@@ -177,8 +256,13 @@ function LessonsTab() {
   const loadLessons = async () => {
     try {
       const [lessonsData, studentsData] = await Promise.all([getAllLessons(), getStudents()]);
-      setLessons(lessonsData); setStudents(studentsData);
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+      setLessons(lessonsData); 
+      setStudents(studentsData);
+    } catch (err) { 
+      console.error(err); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   useEffect(() => { loadLessons(); }, []);
@@ -187,10 +271,16 @@ function LessonsTab() {
     if (!selectedStudent || !lessonDate || !lessonTime) return;
     try {
       await createLesson(selectedStudent, new Date(`${lessonDate}T${lessonTime}:00`).toISOString(), lessonTopic);
-      setLessonDate(''); setLessonTime(''); setLessonTopic(''); setSelectedStudent(''); setShowAddForm(false);
+      setLessonDate(''); 
+      setLessonTime(''); 
+      setLessonTopic(''); 
+      setSelectedStudent(''); 
+      setShowAddForm(false);
       await loadLessons();
       alert('Урок создан!');
-    } catch (err: any) { alert('Ошибка: ' + err.message); }
+    } catch (err: any) { 
+      alert('Ошибка: ' + err.message); 
+    }
   };
 
   const handleCancel = async (lessonId: string) => {
@@ -201,17 +291,30 @@ function LessonsTab() {
       if (result === 'canceled_free_with_compensation') alert('Отменено (компенсация +1).');
       else alert('Отменено бесплатно.');
       await loadLessons();
-    } catch (err: any) { alert('Ошибка: ' + err.message); }
+    } catch (err: any) { 
+      alert('Ошибка: ' + err.message); 
+    }
   };
 
   const handleComplete = async (lessonId: string) => {
     const topic = prompt('Тема урока:');
     if (!topic) return;
-    try { await completeLesson(lessonId, topic); await loadLessons(); alert('Урок завершен!'); } catch (err: any) { alert('Ошибка: ' + err.message); }
+    try { 
+      await completeLesson(lessonId, topic); 
+      await loadLessons(); 
+      alert('Урок завершен!'); 
+    } catch (err: any) { 
+      alert('Ошибка: ' + err.message); 
+    }
   };
 
   const getStatusText = (status: string) => {
-    const map: any = { 'scheduled': '🕒 Запланирован', 'completed': '✅ Проведен', 'canceled_free': '❌ Отменен (бесплатно)', 'canceled_paid': '❌ Отменен (списан)' };
+    const map: any = { 
+      'scheduled': '🕒 Запланирован', 
+      'completed': '✅ Проведен', 
+      'canceled_free': '❌ Отменен (бесплатно)', 
+      'canceled_paid': '❌ Отменен (списан)' 
+    };
     return map[status] || status;
   };
 
@@ -226,7 +329,10 @@ function LessonsTab() {
       </div>
       {showAddForm && (
         <div className="bg-white p-4 rounded-lg mb-4 shadow">
-          <select value={selectedStudent} onChange={(e) => setSelectedStudent(e.target.value)} className="w-full p-2 border rounded mb-2"><option value="">Ученик</option>{students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}</select>
+          <select value={selectedStudent} onChange={(e) => setSelectedStudent(e.target.value)} className="w-full p-2 border rounded mb-2">
+            <option value="">Ученик</option>
+            {students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+          </select>
           <input type="date" value={lessonDate} onChange={(e) => setLessonDate(e.target.value)} className="w-full p-2 border rounded mb-2" />
           <input type="time" value={lessonTime} onChange={(e) => setLessonTime(e.target.value)} className="w-full p-2 border rounded mb-2" />
           <input type="text" placeholder="Тема" value={lessonTopic} onChange={(e) => setLessonTopic(e.target.value)} className="w-full p-2 border rounded mb-2" />
@@ -247,7 +353,7 @@ function LessonsTab() {
             {lesson.status === 'scheduled' && (
               <div className="flex gap-2 mt-3">
                 <button onClick={() => handleComplete(lesson.id)} className="flex-1 bg-green-500 text-white py-2 rounded text-sm">✅</button>
-                <button onClick={() => handleCancel(lesson.id)} className="flex-1 bg-red-500 text-white py-2 rounded text-sm"></button>
+                <button onClick={() => handleCancel(lesson.id)} className="flex-1 bg-red-500 text-white py-2 rounded text-sm">❌</button>
               </div>
             )}
           </div>
@@ -268,7 +374,11 @@ function FinanceTab() {
     try {
       const data = await calculateEarnings(new Date(startDate).toISOString(), new Date(endDate).toISOString());
       setResult({ totalSum: data.totalSum, count: data.count });
-    } catch (err) { alert('Ошибка'); } finally { setLoading(false); }
+    } catch (err) { 
+      alert('Ошибка'); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   return (
@@ -322,7 +432,9 @@ function SettingsTab() {
     try {
       await updateTeacherRules(rules);
       alert('Правила сохранены и обновлены у всех учеников!');
-    } catch (err: any) { alert('Ошибка: ' + err.message); }
+    } catch (err: any) { 
+      alert('Ошибка: ' + err.message); 
+    }
   };
 
   if (loading) return <div className="p-6 text-center">Загрузка...</div>;
@@ -366,7 +478,14 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
 
   useEffect(() => {
     const fetchNextLesson = async () => {
-      try { const lesson = await getMyNextLesson(telegramId); setNextLesson(lesson); } catch (err) { console.error(err); } finally { setLoading(false); }
+      try { 
+        const lesson = await getMyNextLesson(telegramId); 
+        setNextLesson(lesson); 
+      } catch (err) { 
+        console.error(err); 
+      } finally { 
+        setLoading(false); 
+      }
     };
     fetchNextLesson();
   }, [telegramId]);
@@ -375,7 +494,10 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
     if (!nextLesson) return;
     const updateTimer = () => {
       const diff = new Date(nextLesson.start_time).getTime() - new Date().getTime();
-      if (diff <= 0) { setTimeLeft('Урок начался!'); return; }
+      if (diff <= 0) { 
+        setTimeLeft('Урок начался!'); 
+        return; 
+      }
       const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
       const s = Math.floor((diff % (1000 * 60)) / 1000);
@@ -394,8 +516,11 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
       const res = await cancelLesson(nextLesson.id, hasValidReason, 'student');
       if (res === 'canceled_paid') alert('Списан 1 урок.');
       else alert('Отменено бесплатно.');
-      setNextLesson(null); setTimeLeft('');
-    } catch (err: any) { alert('Ошибка: ' + err.message); }
+      setNextLesson(null); 
+      setTimeLeft('');
+    } catch (err: any) { 
+      alert('Ошибка: ' + err.message); 
+    }
   };
 
   const handleSendFeedback = async () => {
@@ -404,7 +529,9 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
     try {
       await sendFeedback(user.full_name, msg);
       alert("Отзыв отправлен преподавателю! 💬");
-    } catch (err) { alert("Ошибка отправки"); }
+    } catch (err) { 
+      alert("Ошибка отправки"); 
+    }
   };
 
   if (loading) return <div className="p-6 text-center">Загрузка...</div>;
@@ -416,7 +543,10 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
   return (
     <div className="p-4 space-y-4">
       <div className={`bg-white p-4 rounded-xl shadow flex justify-between items-center border-l-4 ${balClass}`}>
-        <div><p className="text-sm text-gray-500">Баланс</p><p className="text-3xl font-bold">{user.balance}</p></div>
+        <div>
+          <p className="text-sm text-gray-500">Баланс</p>
+          <p className="text-3xl font-bold">{user.balance}</p>
+        </div>
         <div className="text-4xl">{user.balance <= 1 ? '💸' : '📚'}</div>
       </div>
 
@@ -426,7 +556,9 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
           <>
             <h3 className="text-2xl font-bold mb-2">{nextLesson.topic || 'Без темы'}</h3>
             <p className="text-blue-100">{new Date(nextLesson.start_time).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}</p>
-            <div className="bg-white/20 rounded-xl p-4 text-center my-4"><p className="text-4xl font-mono font-bold">{timeLeft}</p></div>
+            <div className="bg-white/20 rounded-xl p-4 text-center my-4">
+              <p className="text-4xl font-mono font-bold">{timeLeft}</p>
+            </div>
             <div className="flex flex-col gap-3">
               {nextLesson.meet_link ? (
                 <a href={nextLesson.meet_link} target="_blank" className="w-full bg-white text-blue-600 py-3 rounded-xl font-bold text-center">🎥 Войти в Meet</a>
@@ -437,13 +569,19 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
             </div>
           </>
         ) : (
-          <div className="text-center py-4"><p className="text-xl font-bold">Нет уроков</p></div>
+          <div className="text-center py-4">
+            <p className="text-xl font-bold">Нет уроков</p>
+          </div>
         )}
       </div>
 
       <div className="bg-white p-6 rounded-xl shadow">
         <h3 className="font-bold text-lg mb-3">📚 Материалы</h3>
-        {user.google_doc_url ? <a href={user.google_doc_url} target="_blank" className="block w-full bg-green-50 text-green-700 py-3 rounded-lg text-center font-semibold border border-green-200">Открыть Документ ↗</a> : <p className="text-gray-500 text-sm">Нет ссылки</p>}
+        {user.google_doc_url ? (
+          <a href={user.google_doc_url} target="_blank" className="block w-full bg-green-50 text-green-700 py-3 rounded-lg text-center font-semibold border border-green-200">Открыть Документ ↗</a>
+        ) : (
+          <p className="text-gray-500 text-sm">Нет ссылки</p>
+        )}
       </div>
 
       <div className="bg-white p-6 rounded-xl shadow">

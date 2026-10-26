@@ -28,7 +28,8 @@ export async function authenticateUser() {
       is_new: false,
       language: null,
       google_doc_url: null,
-      price_per_lesson: 0
+      price_per_lesson: 0,
+      fixed_schedule: ''
     };
   }
 
@@ -75,7 +76,8 @@ export async function authenticateUser() {
           is_new: data.is_new,
           language: data.language,
           google_doc_url: data.google_doc_url,
-          price_per_lesson: data.price_per_lesson || 0
+          price_per_lesson: data.price_per_lesson || 0,
+          fixed_schedule: data.fixed_schedule || ''
         };
       }
     } catch (err) { console.error("Ошибка проверки initData:", err); }
@@ -93,7 +95,8 @@ export async function authenticateUser() {
       ...existingUser,
       telegram_id: telegramId,
       user_id: existingUser.id,
-      price_per_lesson: existingUser.price_per_lesson || 0
+      price_per_lesson: existingUser.price_per_lesson || 0,
+      fixed_schedule: existingUser.fixed_schedule || ''
     };
   }
 
@@ -107,7 +110,8 @@ export async function authenticateUser() {
       is_new: true,
       language: null,
       google_doc_url: null,
-      price_per_lesson: 0
+      price_per_lesson: 0,
+      fixed_schedule: ''
     }])
     .select()
     .single();
@@ -119,7 +123,8 @@ export async function authenticateUser() {
     ...newUser,
     telegram_id: telegramId,
     user_id: newUser.id,
-    price_per_lesson: newUser.price_per_lesson || 0
+    price_per_lesson: newUser.price_per_lesson || 0,
+    fixed_schedule: newUser.fixed_schedule || ''
   };
 }
 
@@ -136,7 +141,7 @@ export async function getStudents() {
 export async function addStudent(telegramId: number, fullName: string) {
   const { data, error } = await supabase
     .from('tutor_profiles')
-    .insert([{ telegram_id: telegramId, full_name: fullName, role: 'student', balance: 0, is_new: true, price_per_lesson: 0 }])
+    .insert([{ telegram_id: telegramId, full_name: fullName, role: 'student', balance: 0, is_new: true, price_per_lesson: 0, fixed_schedule: '' }])
     .select()
     .single();
   if (error) throw error;
@@ -152,7 +157,7 @@ export async function adjustBalance(studentId: string, amount: number, reason: s
   if (error) throw error;
 }
 
-export async function updateStudentSettings(studentId: string, settings: { price_per_lesson?: number, meet_link?: string, google_doc_url?: string }) {
+export async function updateStudentSettings(studentId: string, settings: { price_per_lesson?: number, meet_link?: string, google_doc_url?: string, fixed_schedule?: string }) {
   const { error } = await supabase
     .from('tutor_profiles')
     .update(settings)
@@ -188,9 +193,7 @@ export async function sendFeedback(studentName: string, message: string) {
   });
 }
 
-// === ОБНОВЛЕНО: Сохраняем цену на момент создания урока ===
 export async function createLesson(studentId: string, startTime: string, topic: string) {
-  // 1. Получаем текущую цену и ссылку ученика
   const { data: student } = await supabase
     .from('tutor_profiles')
     .select('meet_link, price_per_lesson')
@@ -200,7 +203,6 @@ export async function createLesson(studentId: string, startTime: string, topic: 
   const meetLink = student?.meet_link || null;
   const priceSnapshot = student?.price_per_lesson || 0;
 
-  // 2. Создаем урок с этой "замороженной" ценой
   const { data, error } = await supabase
     .from('tutor_lessons')
     .insert([{ 
@@ -209,13 +211,84 @@ export async function createLesson(studentId: string, startTime: string, topic: 
       status: 'scheduled', 
       topic,
       meet_link: meetLink,
-      price_snapshot: priceSnapshot // ЗАПОМИНАЕМ ЦЕНУ
+      price_snapshot: priceSnapshot
     }])
     .select()
     .single();
   
   if (error) throw error;
   return data;
+}
+
+// === ГЕНЕРАТОР РАСПИСАНИЯ ===
+export async function generateRecurringLessons(studentId: string, weeks: number = 4) {
+  const { data: student, error: sErr } = await supabase
+    .from('tutor_profiles')
+    .select('fixed_schedule, price_per_lesson, meet_link')
+    .eq('id', studentId)
+    .single();
+    
+  if (sErr || !student) throw new Error("Ученик не найден");
+  if (!student.fixed_schedule?.trim()) throw new Error("Сначала укажите расписание в настройках ученика");
+
+  const dayMap: Record<string, number> = { 'Пн': 1, 'Вт': 2, 'Ср': 3, 'Чт': 4, 'Пт': 5, 'Сб': 6, 'Вс': 0 };
+  const slots = student.fixed_schedule.split(',').map(s => s.trim()).filter(Boolean);
+  const now = new Date(); 
+  now.setHours(0, 0, 0, 0);
+  const endDate = new Date(now); 
+  endDate.setDate(endDate.getDate() + weeks * 7);
+  
+  const { data: existing } = await supabase
+    .from('tutor_lessons')
+    .select('start_time')
+    .eq('student_id', studentId)
+    .eq('status', 'scheduled')
+    .gte('start_time', now.toISOString())
+    .lte('start_time', endDate.toISOString());
+    
+  const existingTimes = new Set(existing?.map(l => l.start_time) || []);
+  const toInsert: any[] = [];
+
+  for (let w = 0; w < weeks; w++) {
+    for (const slot of slots) {
+      const parts = slot.split(' ');
+      if (parts.length < 2) continue;
+      
+      const dayStr = parts[0].replace(/[.,]/g, '');
+      const timeStr = parts[1];
+      const dayIdx = dayMap[dayStr];
+      if (dayIdx === undefined) continue;
+
+      const target = new Date(now);
+      const daysUntil = (dayIdx - now.getDay() + 7) % 7;
+      target.setDate(now.getDate() + daysUntil + (w * 7));
+      
+      const [h, m] = timeStr.split(':').map(Number);
+      target.setHours(h, m, 0, 0);
+
+      if (target < now) continue;
+      
+      const iso = target.toISOString();
+      if (!existingTimes.has(iso)) {
+        toInsert.push({ 
+          student_id: studentId, 
+          start_time: iso, 
+          status: 'scheduled', 
+          topic: 'Занятие по расписанию', 
+          meet_link: student.meet_link || null, 
+          price_snapshot: student.price_per_lesson || 0 
+        });
+        existingTimes.add(iso);
+      }
+    }
+  }
+
+  if (toInsert.length === 0) return { created: 0, message: "Уроки на этот период уже существуют" };
+  
+  const { error: iErr } = await supabase.from('tutor_lessons').insert(toInsert);
+  if (iErr) throw iErr;
+  
+  return { created: toInsert.length, message: `✅ Создано ${toInsert.length} уроков` };
 }
 
 export async function getAllLessons() {
@@ -299,7 +372,6 @@ export async function getMyHomeworks(telegramId: string) {
   return data;
 }
 
-// === ОБНОВЛЕНО: Считаем заработок по сохраненной цене урока ===
 export async function calculateEarnings(startDate: string, endDate: string) {
   const { data, error } = await supabase
     .from('tutor_lessons')
@@ -315,7 +387,6 @@ export async function calculateEarnings(startDate: string, endDate: string) {
   const earningsDetails: any[] = [];
 
   data.forEach((lesson: any) => {
-    // Берем цену из урока (price_snapshot). Если это старый урок (где snapshot еще нет), берем текущую цену ученика.
     const price = lesson.price_snapshot || lesson.student?.price_per_lesson || 0;
     totalSum += price;
     earningsDetails.push({ date: lesson.start_time, studentName: lesson.student?.full_name, price: price });
