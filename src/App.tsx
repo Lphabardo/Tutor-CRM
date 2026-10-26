@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentDocUrl } from './lib/api';
+import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentDocUrl, deleteStudent } from './lib/api';
 import OnboardingForm from './components/OnboardingForm';
 
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
@@ -132,6 +132,19 @@ function StudentsTab() {
     }
   };
 
+  // === НОВАЯ ФУНКЦИЯ УДАЛЕНИЯ ===
+  const handleDeleteStudent = async (studentId: string, studentName: string) => {
+    if (!confirm(`Вы уверены, что хотите удалить ученика "${studentName}"?\nЭто действие нельзя отменить.`)) return;
+    try {
+      await deleteStudent(studentId);
+      await loadStudents();
+      alert('Ученик удален');
+    } catch (err: any) {
+      alert('Ошибка при удалении: ' + err.message);
+    }
+  };
+  // ============================
+
   const handleUpdateDocUrl = async (studentId: string, currentUrl: string) => {
     const newUrl = prompt('Вставьте ссылку на Google Документ (конспект и ДЗ):', currentUrl || '');
     if (newUrl === null) return; // Пользователь нажал "Отмена"
@@ -200,31 +213,39 @@ function StudentsTab() {
               </div>
             </div>
             
-            <div className="flex gap-2 mt-3">
+            <div className="flex gap-2 mt-3 flex-wrap">
               <button 
                 onClick={() => handleBalanceChange(student.id, 1, 'Пополнение баланса')}
-                className="flex-1 bg-green-500 text-white py-2 rounded text-sm"
+                className="flex-1 bg-green-500 text-white py-2 rounded text-sm min-w-[60px]"
               >
                 +1 урок
               </button>
               <button 
                 onClick={() => handleBalanceChange(student.id, -1, 'Списание урока')}
-                className="flex-1 bg-red-500 text-white py-2 rounded text-sm"
+                className="flex-1 bg-red-500 text-white py-2 rounded text-sm min-w-[60px]"
               >
                 -1 урок
               </button>
               <button 
                 onClick={() => handleBalanceChange(student.id, 5, 'Пакет из 5 уроков')}
-                className="flex-1 bg-blue-500 text-white py-2 rounded text-sm"
+                className="flex-1 bg-blue-500 text-white py-2 rounded text-sm min-w-[60px]"
               >
                 +5 уроков
               </button>
               <button 
                 onClick={() => handleUpdateDocUrl(student.id, student.google_doc_url)}
-                className="flex-1 bg-purple-500 text-white py-2 rounded text-sm flex items-center justify-center gap-1"
+                className="flex-1 bg-purple-500 text-white py-2 rounded text-sm min-w-[60px] flex items-center justify-center gap-1"
               >
-                📎 Документ {student.google_doc_url ? '✅' : ''}
+                📎 Док
               </button>
+              {/* === КНОПКА УДАЛЕНИЯ === */}
+              <button 
+                onClick={() => handleDeleteStudent(student.id, student.full_name)}
+                className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm min-w-[60px] border border-red-200 hover:bg-red-50"
+              >
+                🗑 Удалить
+              </button>
+              {/* ======================== */}
             </div>
           </div>
         ))
@@ -502,7 +523,7 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
   return (
     <div className="p-4 space-y-4">
       
-      {/* === КАРТОЧКА БАЛАНСА (НОВАЯ) === */}
+      {/* === КАРТОЧКА БАЛАНСА === */}
       <div className={`bg-white p-4 rounded-xl shadow flex justify-between items-center border-l-4 ${balanceColorClass}`}>
         <div>
           <p className="text-sm text-gray-500">Ваш баланс</p>

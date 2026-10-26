@@ -229,6 +229,15 @@ export async function completeLesson(lessonId: string, topic: string) {
   if (error) throw error;
 }
 
+// === УДАЛЕНИЕ УЧЕНИКА ===
+export async function deleteStudent(studentId: string) {
+  const { error } = await supabase
+    .from('tutor_profiles')
+    .delete()
+    .eq('id', studentId);
+  if (error) throw error;
+}
+
 // === ФУНКЦИИ ДЛЯ УЧЕНИКА ===
 
 // Получить ближайший запланированный урок ученика
