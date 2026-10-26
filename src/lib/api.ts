@@ -1,6 +1,5 @@
 import { supabase } from './supabase';
 
-// ТВОЙ БОТ ТОКЕН (Для отправки отзывов)
 const BOT_TOKEN = "8930796552:AAGaXKS89TcPsz7vrkZeSQbWxwYL18gSry0";
 const TEACHER_CHAT_ID = "830672781";
 
@@ -161,24 +160,14 @@ export async function updateStudentSettings(studentId: string, settings: { price
   if (error) throw error;
 }
 
-// === НОВОЕ: Обновление правил преподавателя ===
 export async function updateTeacherRules(rulesText: string) {
-  // Обновляем правила у ВСЕХ учеников и преподавателя для синхронизации
-  // Но проще обновить только у преподавателя, а ученики будут читать оттуда
-  // В рамках текущей логики обновим у текущего юзера (преподавателя)
-  // И также обновим глобальную настройку, если бы она была.
-  // Сейчас просто обновим запись преподавателя.
   const { data: tutor } = await supabase.from('tutor_profiles').select('id').eq('role', 'tutor').single();
-  
   if (tutor) {
      await supabase.from('tutor_profiles').update({ rules_text: rulesText }).eq('id', tutor.id);
   }
-  
-  // Также обновим у всех студентов, чтобы они видели изменения сразу при входе
   await supabase.from('tutor_profiles').update({ rules_text: rulesText }).eq('role', 'student');
 }
 
-// === НОВОЕ: Получение отзывов ===
 export async function getFeedbacks() {
   const { data, error } = await supabase
     .from('student_feedback')
@@ -188,12 +177,9 @@ export async function getFeedbacks() {
   return data;
 }
 
-// === НОВОЕ: Отправка отзыва (в бот и в базу) ===
 export async function sendFeedback(studentName: string, message: string) {
-  // 1. Сохраняем в базу
   await supabase.from('student_feedback').insert({ student_name: studentName, message });
 
-  // 2. Отправляем в Телеграм Преподавателю
   const text = `💬 НОВЫЙ ОТЗЫВ!\n\nОт: ${studentName}\nСообщение:\n${message}`;
   await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: 'POST',
@@ -202,10 +188,19 @@ export async function sendFeedback(studentName: string, message: string) {
   });
 }
 
+// === ОБНОВЛЕНО: Сохраняем цену на момент создания урока ===
 export async function createLesson(studentId: string, startTime: string, topic: string) {
-  const { data: student } = await supabase.from('tutor_profiles').select('meet_link').eq('id', studentId).single();
-  const meetLink = student?.meet_link || null;
+  // 1. Получаем текущую цену и ссылку ученика
+  const { data: student } = await supabase
+    .from('tutor_profiles')
+    .select('meet_link, price_per_lesson')
+    .eq('id', studentId)
+    .single();
 
+  const meetLink = student?.meet_link || null;
+  const priceSnapshot = student?.price_per_lesson || 0;
+
+  // 2. Создаем урок с этой "замороженной" ценой
   const { data, error } = await supabase
     .from('tutor_lessons')
     .insert([{ 
@@ -213,7 +208,8 @@ export async function createLesson(studentId: string, startTime: string, topic: 
       start_time: startTime, 
       status: 'scheduled', 
       topic,
-      meet_link: meetLink 
+      meet_link: meetLink,
+      price_snapshot: priceSnapshot // ЗАПОМИНАЕМ ЦЕНУ
     }])
     .select()
     .single();
@@ -303,6 +299,7 @@ export async function getMyHomeworks(telegramId: string) {
   return data;
 }
 
+// === ОБНОВЛЕНО: Считаем заработок по сохраненной цене урока ===
 export async function calculateEarnings(startDate: string, endDate: string) {
   const { data, error } = await supabase
     .from('tutor_lessons')
@@ -318,7 +315,8 @@ export async function calculateEarnings(startDate: string, endDate: string) {
   const earningsDetails: any[] = [];
 
   data.forEach((lesson: any) => {
-    const price = lesson.student?.price_per_lesson || 0;
+    // Берем цену из урока (price_snapshot). Если это старый урок (где snapshot еще нет), берем текущую цену ученика.
+    const price = lesson.price_snapshot || lesson.student?.price_per_lesson || 0;
     totalSum += price;
     earningsDetails.push({ date: lesson.start_time, studentName: lesson.student?.full_name, price: price });
   });

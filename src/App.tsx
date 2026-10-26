@@ -47,7 +47,7 @@ function App() {
       <div className="bg-white p-4 shadow-sm">
         <h1 className="text-xl font-bold">Привет, {user.full_name}! 👋</h1>
         <p className="text-sm text-gray-500 mt-1">
-          {user.role === 'tutor' ? '👨‍🏫 Преподаватель' : '👨‍ Ученик'} | ID: {user.telegram_id}
+          {user.role === 'tutor' ? '👨‍🏫 Преподаватель' : '👨‍🎓 Ученик'} | ID: {user.telegram_id}
           {user.language && ` | Язык: ${user.language}`}
         </p>
       </div>
@@ -108,7 +108,7 @@ function StudentsTab() {
   };
 
   const handleUpdateSettings = async (studentId: string, currentPrice: number, currentMeet: string, currentDoc: string) => {
-    const newPrice = prompt(`Введите цену за урок (сейчас ${currentPrice}):`, String(currentPrice));
+    const newPrice = prompt(`Введите цену за урок в ГРН (сейчас ${currentPrice}):`, String(currentPrice));
     if (newPrice === null) return;
     const newMeet = prompt(`Введите ссылку на Meet:`, currentMeet);
     if (newMeet === null) return;
@@ -274,7 +274,7 @@ function FinanceTab() {
   return (
     <div className="p-4 space-y-6">
       <div className="bg-white p-6 rounded-xl shadow">
-        <h3 className="font-bold text-lg mb-4">💰 Калькулятор</h3>
+        <h3 className="font-bold text-lg mb-4">💰 Калькулятор (ГРН)</h3>
         <div className="grid grid-cols-2 gap-4 mb-4">
           <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full p-2 border rounded" />
           <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full p-2 border rounded" />
@@ -284,14 +284,13 @@ function FinanceTab() {
       {result && (
         <div className="bg-green-50 p-6 rounded-xl shadow border border-green-200 text-center">
           <p className="text-gray-600">Уроков: {result.count}</p>
-          <p className="text-4xl font-bold text-green-700 mt-2">{result.totalSum} ₽</p>
+          <p className="text-4xl font-bold text-green-700 mt-2">{result.totalSum} ₴</p>
         </div>
       )}
     </div>
   );
 }
 
-// === НОВАЯ ВКЛАДКА НАСТРОЕК ===
 function SettingsTab() {
   const [rules, setRules] = useState('');
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
@@ -299,15 +298,10 @@ function SettingsTab() {
 
   useEffect(() => {
     const loadData = async () => {
-      // Загружаем правила (берем от первого попавшегося ученика или преподавателя, они синхронизированы)
-      // Для простоты, загрузим профиль преподавателя
-      // Но у нас нет прямой функции getTutorProfile, поэтому используем хак: загрузим список учеников и возьмем правила оттуда,
-      // так как они копируются при updateTeacherRules.
       const students = await getStudents();
       if (students.length > 0 && students[0].rules_text) {
         setRules(students[0].rules_text);
       } else {
-        // Дефолтные правила если пусто
         setRules(`Правила переноса и отмены занятий:
 1. Неявка без уведомления = урок проведен.
 2. Отмена < 3 часов = урок проведен.
@@ -317,7 +311,6 @@ function SettingsTab() {
 
 Оплата заранее пакетами.`);
       }
-
       const feedbacksData = await getFeedbacks();
       setFeedbacks(feedbacksData);
       setLoading(false);
@@ -424,7 +417,7 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
     <div className="p-4 space-y-4">
       <div className={`bg-white p-4 rounded-xl shadow flex justify-between items-center border-l-4 ${balClass}`}>
         <div><p className="text-sm text-gray-500">Баланс</p><p className="text-3xl font-bold">{user.balance}</p></div>
-        <div className="text-4xl">{user.balance <= 1 ? '' : '📚'}</div>
+        <div className="text-4xl">{user.balance <= 1 ? '💸' : '📚'}</div>
       </div>
 
       <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-2xl shadow-lg">
