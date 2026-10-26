@@ -132,7 +132,6 @@ function StudentsTab() {
     }
   };
 
-  // === НОВАЯ ФУНКЦИЯ УДАЛЕНИЯ ===
   const handleDeleteStudent = async (studentId: string, studentName: string) => {
     if (!confirm(`Вы уверены, что хотите удалить ученика "${studentName}"?\nЭто действие нельзя отменить.`)) return;
     try {
@@ -143,11 +142,10 @@ function StudentsTab() {
       alert('Ошибка при удалении: ' + err.message);
     }
   };
-  // ============================
 
   const handleUpdateDocUrl = async (studentId: string, currentUrl: string) => {
     const newUrl = prompt('Вставьте ссылку на Google Документ (конспект и ДЗ):', currentUrl || '');
-    if (newUrl === null) return; // Пользователь нажал "Отмена"
+    if (newUrl === null) return; 
     
     try {
       await updateStudentDocUrl(studentId, newUrl);
@@ -238,14 +236,12 @@ function StudentsTab() {
               >
                 📎 Док
               </button>
-              {/* === КНОПКА УДАЛЕНИЯ === */}
               <button 
                 onClick={() => handleDeleteStudent(student.id, student.full_name)}
                 className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm min-w-[60px] border border-red-200 hover:bg-red-50"
               >
                 🗑 Удалить
               </button>
-              {/* ======================== */}
             </div>
           </div>
         ))
@@ -259,6 +255,7 @@ function LessonsTab() {
   const [lessons, setLessons] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showHistory, setShowHistory] = useState(false); // <--- НОВОЕ: Состояние для истории
   const [students, setStudents] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState('');
   const [lessonDate, setLessonDate] = useState('');
@@ -344,14 +341,31 @@ function LessonsTab() {
 
   if (loading) return <div className="p-6 text-center">Загрузка...</div>;
 
+  // <--- НОВОЕ: Фильтрация уроков
+  const filteredLessons = showHistory 
+    ? lessons 
+    : lessons.filter(l => l.status === 'scheduled');
+
   return (
     <div className="p-4">
-      <button 
-        onClick={() => setShowAddForm(!showAddForm)}
-        className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold mb-4"
-      >
-        + Назначить урок
-      </button>
+      <div className="flex gap-2 mb-4">
+        <button 
+          onClick={() => setShowAddForm(!showAddForm)}
+          className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold"
+        >
+          + Назначить урок
+        </button>
+        <button 
+          onClick={() => setShowHistory(!showHistory)}
+          className={`px-4 py-3 rounded-lg font-medium border transition whitespace-nowrap ${
+            showHistory 
+              ? 'bg-blue-50 text-blue-600 border-blue-200' 
+              : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+          }`}
+        >
+          {showHistory ? 'Скрыть историю' : '📜 История'}
+        </button>
+      </div>
 
       {showAddForm && (
         <div className="bg-white p-4 rounded-lg mb-4 shadow">
@@ -393,10 +407,12 @@ function LessonsTab() {
         </div>
       )}
 
-      {lessons.length === 0 ? (
-        <p className="text-center text-gray-500">Уроков пока нет</p>
+      {filteredLessons.length === 0 ? (
+        <p className="text-center text-gray-500 py-8">
+          {showHistory ? 'История уроков пуста' : 'Запланированных уроков пока нет 🎉'}
+        </p>
       ) : (
-        lessons.map(lesson => (
+        filteredLessons.map(lesson => (
           <div key={lesson.id} className="bg-white p-4 rounded-lg mb-3 shadow">
             <div className="flex justify-between items-start mb-2">
               <div>
@@ -509,21 +525,19 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
 
   if (loading) return <div className="p-6 text-center">Загрузка кабинета...</div>;
 
-  // === ЛОГИКА ЦВЕТА ДЛЯ БАЛАНСА ===
   let balanceColorClass = 'border-blue-500';
   let balanceTextClass = 'text-blue-600';
   
   if (user.balance <= 2) {
-    balanceColorClass = 'border-red-500 bg-red-50'; // Красная рамка и фон
+    balanceColorClass = 'border-red-500 bg-red-50';
     balanceTextClass = 'text-red-600';
   } else if (user.balance <= 4) {
-    balanceColorClass = 'border-yellow-500'; // Желтая рамка
+    balanceColorClass = 'border-yellow-500';
   }
 
   return (
     <div className="p-4 space-y-4">
       
-      {/* === КАРТОЧКА БАЛАНСА === */}
       <div className={`bg-white p-4 rounded-xl shadow flex justify-between items-center border-l-4 ${balanceColorClass}`}>
         <div>
           <p className="text-sm text-gray-500">Ваш баланс</p>
@@ -535,7 +549,6 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
         </div>
       </div>
 
-      {/* Карточка ближайшего урока */}
       <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-2xl shadow-lg">
         <h2 className="text-lg font-semibold opacity-90 mb-1">⏰ Ближайший урок</h2>
         
@@ -578,7 +591,6 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
         )}
       </div>
 
-      {/* Карточка материалов */}
       <div className="bg-white p-6 rounded-xl shadow">
         <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
           📚 Конспект и Домашнее задание
@@ -597,7 +609,6 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
         )}
       </div>
 
-      {/* Карточка правил */}
       <div className="bg-white p-6 rounded-xl shadow">
         <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
           ⚖️ Правила обучения
