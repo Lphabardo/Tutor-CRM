@@ -488,8 +488,32 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
 
   if (loading) return <div className="p-6 text-center">Загрузка кабинета...</div>;
 
+  // === ЛОГИКА ЦВЕТА ДЛЯ БАЛАНСА ===
+  let balanceColorClass = 'border-blue-500';
+  let balanceTextClass = 'text-blue-600';
+  
+  if (user.balance <= 2) {
+    balanceColorClass = 'border-red-500 bg-red-50'; // Красная рамка и фон
+    balanceTextClass = 'text-red-600';
+  } else if (user.balance <= 4) {
+    balanceColorClass = 'border-yellow-500'; // Желтая рамка
+  }
+
   return (
     <div className="p-4 space-y-4">
+      
+      {/* === КАРТОЧКА БАЛАНСА (НОВАЯ) === */}
+      <div className={`bg-white p-4 rounded-xl shadow flex justify-between items-center border-l-4 ${balanceColorClass}`}>
+        <div>
+          <p className="text-sm text-gray-500">Ваш баланс</p>
+          <p className={`text-3xl font-bold ${balanceTextClass}`}>{user.balance || 0}</p>
+          <p className="text-xs text-gray-400 mt-1">уроков осталось</p>
+        </div>
+        <div className="text-4xl opacity-80">
+          {user.balance <= 1 ? '💸' : '📚'}
+        </div>
+      </div>
+
       {/* Карточка ближайшего урока */}
       <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-2xl shadow-lg">
         <h2 className="text-lg font-semibold opacity-90 mb-1">⏰ Ближайший урок</h2>
