@@ -24,7 +24,8 @@ export async function authenticateUser() {
       user_id: 'test-user-id',
       is_new: false,
       language: null,
-      google_doc_url: null
+      google_doc_url: null,
+      price_per_lesson: 0
     };
   }
 
@@ -57,11 +58,7 @@ export async function authenticateUser() {
     try {
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-telegram`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ initData })
-        }
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) }
       );
       const data = await response.json();
       if (data.success && data.role) {
@@ -74,12 +71,11 @@ export async function authenticateUser() {
           user_id: data.user_id,
           is_new: data.is_new,
           language: data.language,
-          google_doc_url: data.google_doc_url
+          google_doc_url: data.google_doc_url,
+          price_per_lesson: data.price_per_lesson || 0
         };
       }
-    } catch (err) {
-      console.error("Ошибка проверки initData:", err);
-    }
+    } catch (err) { console.error("Ошибка проверки initData:", err); }
   }
 
   const { data: existingUser, error: fetchError } = await supabase
@@ -93,7 +89,8 @@ export async function authenticateUser() {
       success: true,
       ...existingUser,
       telegram_id: telegramId,
-      user_id: existingUser.id
+      user_id: existingUser.id,
+      price_per_lesson: existingUser.price_per_lesson || 0
     };
   }
 
@@ -106,7 +103,8 @@ export async function authenticateUser() {
       balance: 0,
       is_new: true,
       language: null,
-      google_doc_url: null
+      google_doc_url: null,
+      price_per_lesson: 0
     }])
     .select()
     .single();
@@ -117,7 +115,8 @@ export async function authenticateUser() {
     success: true,
     ...newUser,
     telegram_id: telegramId,
-    user_id: newUser.id
+    user_id: newUser.id,
+    price_per_lesson: newUser.price_per_lesson || 0
   };
 }
 
@@ -134,7 +133,7 @@ export async function getStudents() {
 export async function addStudent(telegramId: number, fullName: string) {
   const { data, error } = await supabase
     .from('tutor_profiles')
-    .insert([{ telegram_id: telegramId, full_name: fullName, role: 'student', balance: 0, is_new: true }])
+    .insert([{ telegram_id: telegramId, full_name: fullName, role: 'student', balance: 0, is_new: true, price_per_lesson: 0 }])
     .select()
     .single();
   if (error) throw error;
@@ -150,16 +149,27 @@ export async function adjustBalance(studentId: string, amount: number, reason: s
   if (error) throw error;
 }
 
-export async function updateStudentDocUrl(studentId: string, docUrl: string) {
+// Обновление настроек ученика (Цена и Ссылка на Meet)
+export async function updateStudentSettings(studentId: string, settings: { price_per_lesson?: number, meet_link?: string, google_doc_url?: string }) {
   const { error } = await supabase
     .from('tutor_profiles')
-    .update({ google_doc_url: docUrl })
+    .update(settings)
     .eq('id', studentId);
   if (error) throw error;
 }
 
-// === ОБНОВЛЕНО: Добавлен параметр meetLink ===
-export async function createLesson(studentId: string, startTime: string, topic: string, meetLink?: string) {
+// Создание урока с автоматическим подтягиванием ссылки на Meet из профиля ученика
+export async function createLesson(studentId: string, startTime: string, topic: string) {
+  // 1. Сначала узнаем ссылку на Meet у этого ученика
+  const { data: student } = await supabase
+    .from('tutor_profiles')
+    .select('meet_link')
+    .eq('id', studentId)
+    .single();
+
+  const meetLink = student?.meet_link || null;
+
+  // 2. Создаем урок с этой ссылкой
   const { data, error } = await supabase
     .from('tutor_lessons')
     .insert([{ 
@@ -167,10 +177,11 @@ export async function createLesson(studentId: string, startTime: string, topic: 
       start_time: startTime, 
       status: 'scheduled', 
       topic,
-      meet_link: meetLink || null // Сохраняем ссылку, если она есть
+      meet_link: meetLink // Сохраняем текущую ссылку в историю урока
     }])
     .select()
     .single();
+  
   if (error) throw error;
   return data;
 }
@@ -180,7 +191,7 @@ export async function getAllLessons() {
     .from('tutor_lessons')
     .select(`
       *,
-      student:tutor_profiles(full_name, telegram_id, language)
+      student:tutor_profiles(full_name, telegram_id, language, price_per_lesson)
     `)
     .order('start_time', { ascending: true });
   if (error) throw error;
@@ -225,7 +236,7 @@ export async function getMyNextLesson(telegramId: string) {
 
   const { data, error } = await supabase
     .from('tutor_lessons')
-    .select('*') // * автоматически заберет и новое поле meet_link
+    .select('*')
     .eq('student_id', profile.id)
     .eq('status', 'scheduled')
     .gte('start_time', new Date().toISOString())
@@ -273,4 +284,37 @@ export async function getMyHomeworks(telegramId: string) {
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data;
+}
+
+// === НОВАЯ ФУНКЦИЯ: Расчет заработка ===
+export async function calculateEarnings(startDate: string, endDate: string) {
+  // Ищем все уроки со статусом 'completed' в выбранном диапазоне
+  const { data, error } = await supabase
+    .from('tutor_lessons')
+    .select(`
+      *,
+      student:tutor_profiles(price_per_lesson, full_name)
+    `)
+    .eq('status', 'completed')
+    .gte('start_time', startDate)
+    .lte('start_time', endDate)
+    .order('start_time', { ascending: false });
+
+  if (error) throw error;
+
+  let totalSum = 0;
+  const earningsDetails: any[] = [];
+
+  // Считаем сумму (берем цену на момент проведения или текущую - здесь берем текущую для простоты)
+  data.forEach((lesson: any) => {
+    const price = lesson.student?.price_per_lesson || 0;
+    totalSum += price;
+    earningsDetails.push({
+      date: lesson.start_time,
+      studentName: lesson.student?.full_name,
+      price: price
+    });
+  });
+
+  return { totalSum, count: data.length, details: earningsDetails };
 }

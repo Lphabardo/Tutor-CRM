@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentDocUrl, deleteStudent } from './lib/api';
+import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent, calculateEarnings } from './lib/api';
 import OnboardingForm from './components/OnboardingForm';
 
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
@@ -16,7 +16,7 @@ function App() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'students' | 'lessons'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'lessons' | 'finance'>('students');
 
   useEffect(() => {
     if (WebApp) {
@@ -61,18 +61,15 @@ function App() {
   );
 }
 
-function TutorDashboard({ activeTab, setActiveTab }: { activeTab: 'students' | 'lessons', setActiveTab: (tab: 'students' | 'lessons') => void }) {
+function TutorDashboard({ activeTab, setActiveTab }: { activeTab: 'students' | 'lessons' | 'finance', setActiveTab: (tab: 'students' | 'lessons' | 'finance') => void }) {
   return (
     <div>
       <div className="flex border-b bg-white">
-        <button onClick={() => setActiveTab('students')} className={`flex-1 py-3 font-semibold ${activeTab === 'students' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>
-          Ученики
-        </button>
-        <button onClick={() => setActiveTab('lessons')} className={`flex-1 py-3 font-semibold ${activeTab === 'lessons' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>
-          Расписание
-        </button>
+        <button onClick={() => setActiveTab('students')} className={`flex-1 py-3 font-semibold text-sm ${activeTab === 'students' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>Ученики</button>
+        <button onClick={() => setActiveTab('lessons')} className={`flex-1 py-3 font-semibold text-sm ${activeTab === 'lessons' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>Расписание</button>
+        <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 font-semibold text-sm ${activeTab === 'finance' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500'}`}>💰 Финансы</button>
       </div>
-      {activeTab === 'students' ? <StudentsTab /> : <LessonsTab />}
+      {activeTab === 'students' ? <StudentsTab /> : activeTab === 'lessons' ? <LessonsTab /> : <FinanceTab />}
     </div>
   );
 }
@@ -119,13 +116,24 @@ function StudentsTab() {
     } catch (err: any) { alert('Ошибка при удалении: ' + err.message); }
   };
 
-  const handleUpdateDocUrl = async (studentId: string, currentUrl: string) => {
-    const newUrl = prompt('Вставьте ссылку на Google Документ (конспект и ДЗ):', currentUrl || '');
-    if (newUrl === null) return; 
+  const handleUpdateSettings = async (studentId: string, currentPrice: number, currentMeet: string, currentDoc: string) => {
+    const newPrice = prompt(`Введите цену за урок (сейчас ${currentPrice}):`, String(currentPrice));
+    if (newPrice === null) return;
+    
+    const newMeet = prompt(`Введите ссылку на Meet (сейчас ${currentMeet}):`, currentMeet);
+    if (newMeet === null) return;
+
+    const newDoc = prompt(`Введите ссылку на Документ (сейчас ${currentDoc}):`, currentDoc);
+    if (newDoc === null) return;
+
     try {
-      await updateStudentDocUrl(studentId, newUrl);
+      await updateStudentSettings(studentId, {
+        price_per_lesson: parseInt(newPrice) || 0,
+        meet_link: newMeet,
+        google_doc_url: newDoc
+      });
       await loadStudents();
-      alert('Ссылка успешно сохранена!');
+      alert('Настройки сохранены!');
     } catch (err: any) { alert('Ошибка: ' + err.message); }
   };
 
@@ -133,10 +141,7 @@ function StudentsTab() {
 
   return (
     <div className="p-4">
-      <button onClick={() => setShowAddForm(!showAddForm)} className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold mb-4">
-        + Добавить ученика
-      </button>
-
+      <button onClick={() => setShowAddForm(!showAddForm)} className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold mb-4">+ Добавить ученика</button>
       {showAddForm && (
         <div className="bg-white p-4 rounded-lg mb-4 shadow">
           <input type="number" placeholder="Telegram ID ученика" value={newTelegramId} onChange={(e) => setNewTelegramId(e.target.value)} className="w-full p-2 border rounded mb-2" />
@@ -144,7 +149,6 @@ function StudentsTab() {
           <button onClick={handleAddStudent} className="w-full bg-green-600 text-white py-2 rounded">Сохранить</button>
         </div>
       )}
-
       {students.length === 0 ? (
         <p className="text-center text-gray-500">Учеников пока нет</p>
       ) : (
@@ -164,8 +168,10 @@ function StudentsTab() {
               <button onClick={() => handleBalanceChange(student.id, 1, 'Пополнение баланса')} className="flex-1 bg-green-500 text-white py-2 rounded text-sm min-w-[60px]">+1 урок</button>
               <button onClick={() => handleBalanceChange(student.id, -1, 'Списание урока')} className="flex-1 bg-red-500 text-white py-2 rounded text-sm min-w-[60px]">-1 урок</button>
               <button onClick={() => handleBalanceChange(student.id, 5, 'Пакет из 5 уроков')} className="flex-1 bg-blue-500 text-white py-2 rounded text-sm min-w-[60px]">+5 уроков</button>
-              <button onClick={() => handleUpdateDocUrl(student.id, student.google_doc_url)} className="flex-1 bg-purple-500 text-white py-2 rounded text-sm min-w-[60px] flex items-center justify-center gap-1">📎 Док</button>
-              <button onClick={() => handleDeleteStudent(student.id, student.full_name)} className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm min-w-[60px] border border-red-200 hover:bg-red-50">🗑 Удалить</button>
+              <button onClick={() => handleDeleteStudent(student.id, student.full_name)} className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm min-w-[60px] border border-red-200 hover:bg-red-50"></button>
+            </div>
+            <div className="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+              <button onClick={() => handleUpdateSettings(student.id, student.price_per_lesson, student.meet_link, student.google_doc_url)} className="w-full bg-purple-50 text-purple-700 py-2 rounded text-xs border border-purple-200">⚙️ Настройки (Цена/Meet)</button>
             </div>
           </div>
         ))
@@ -184,7 +190,6 @@ function LessonsTab() {
   const [lessonDate, setLessonDate] = useState('');
   const [lessonTime, setLessonTime] = useState('');
   const [lessonTopic, setLessonTopic] = useState('');
-  const [lessonMeetLink, setLessonMeetLink] = useState(''); // <--- НОВОЕ: Ссылка на Meet
 
   const loadLessons = async () => {
     try {
@@ -200,9 +205,8 @@ function LessonsTab() {
     if (!selectedStudent || !lessonDate || !lessonTime) return;
     try {
       const startTime = new Date(`${lessonDate}T${lessonTime}:00`).toISOString();
-      // Передаем ссылку в функцию создания
-      await createLesson(selectedStudent, startTime, lessonTopic, lessonMeetLink);
-      setLessonDate(''); setLessonTime(''); setLessonTopic(''); setLessonMeetLink('');
+      await createLesson(selectedStudent, startTime, lessonTopic);
+      setLessonDate(''); setLessonTime(''); setLessonTopic('');
       setSelectedStudent(''); setShowAddForm(false);
       await loadLessons();
       alert('Урок создан!');
@@ -243,11 +247,8 @@ function LessonsTab() {
     <div className="p-4">
       <div className="flex gap-2 mb-4">
         <button onClick={() => setShowAddForm(!showAddForm)} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold">+ Назначить урок</button>
-        <button onClick={() => setShowHistory(!showHistory)} className={`px-4 py-3 rounded-lg font-medium border transition whitespace-nowrap ${showHistory ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
-          {showHistory ? 'Скрыть историю' : '📜 История'}
-        </button>
+        <button onClick={() => setShowHistory(!showHistory)} className={`px-4 py-3 rounded-lg font-medium border transition whitespace-nowrap ${showHistory ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>{showHistory ? 'Скрыть историю' : '📜 История'}</button>
       </div>
-
       {showAddForm && (
         <div className="bg-white p-4 rounded-lg mb-4 shadow">
           <select value={selectedStudent} onChange={(e) => setSelectedStudent(e.target.value)} className="w-full p-2 border rounded mb-2">
@@ -257,12 +258,9 @@ function LessonsTab() {
           <input type="date" value={lessonDate} onChange={(e) => setLessonDate(e.target.value)} className="w-full p-2 border rounded mb-2" />
           <input type="time" value={lessonTime} onChange={(e) => setLessonTime(e.target.value)} className="w-full p-2 border rounded mb-2" />
           <input type="text" placeholder="Тема урока (необязательно)" value={lessonTopic} onChange={(e) => setLessonTopic(e.target.value)} className="w-full p-2 border rounded mb-2" />
-          {/* === НОВОЕ ПОЛЕ ДЛЯ ССЫЛКИ === */}
-          <input type="url" placeholder="Ссылка на Google Meet (необязательно)" value={lessonMeetLink} onChange={(e) => setLessonMeetLink(e.target.value)} className="w-full p-2 border rounded mb-2" />
           <button onClick={handleCreateLesson} className="w-full bg-green-600 text-white py-2 rounded">Создать урок</button>
         </div>
       )}
-
       {filteredLessons.length === 0 ? (
         <p className="text-center text-gray-500 py-8">{showHistory ? 'История уроков пуста' : 'Запланированных уроков пока нет 🎉'}</p>
       ) : (
@@ -284,6 +282,57 @@ function LessonsTab() {
             )}
           </div>
         ))
+      )}
+    </div>
+  );
+}
+
+function FinanceTab() {
+  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [result, setResult] = useState<{ totalSum: number, count: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleCalculate = async () => {
+    setLoading(true);
+    try {
+      // Добавляем время к дате, чтобы захватить весь день конца периода
+      const endDateTime = new Date(endDate).toISOString(); 
+      const startDateTime = new Date(startDate).toISOString();
+      const data = await calculateEarnings(startDateTime, endDateTime);
+      setResult({ totalSum: data.totalSum, count: data.count });
+    } catch (err) {
+      alert('Ошибка расчета');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-6">
+      <div className="bg-white p-6 rounded-xl shadow">
+        <h3 className="font-bold text-lg mb-4"> Калькулятор заработка</h3>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Дата начала</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full p-2 border rounded" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Дата конца</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full p-2 border rounded" />
+          </div>
+        </div>
+        <button onClick={handleCalculate} disabled={loading} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700 disabled:bg-gray-400">
+          {loading ? 'Считаем...' : 'Рассчитать доход'}
+        </button>
+      </div>
+
+      {result && (
+        <div className="bg-green-50 p-6 rounded-xl shadow border border-green-200 text-center">
+          <p className="text-gray-600 mb-1">Итого проведено уроков: {result.count}</p>
+          <p className="text-gray-600 mb-2">Ваш заработок за период:</p>
+          <p className="text-4xl font-bold text-green-700">{result.totalSum} ₽</p>
+        </div>
       )}
     </div>
   );
@@ -361,7 +410,6 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
               <p className="text-4xl font-mono font-bold tracking-wider">{timeLeft}</p>
             </div>
             <div className="flex flex-col gap-3">
-              {/* === УМНАЯ КНОПКА MEET === */}
               {nextLesson.meet_link ? (
                 <a href={nextLesson.meet_link} target="_blank" rel="noopener noreferrer" className="w-full bg-white text-blue-600 py-3 rounded-xl font-bold text-center shadow hover:bg-blue-50 transition">
                   🎥 Присоединиться к Google Meet
