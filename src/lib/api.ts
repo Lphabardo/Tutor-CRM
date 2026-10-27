@@ -358,12 +358,37 @@ export async function cancelLesson(lessonId: string, hasValidReason: boolean = f
   return data;
 }
 
+// === ИСПРАВЛЕНО: Теперь при завершении урока создается запись в журнале транзакций ===
 export async function completeLesson(lessonId: string, topic: string) {
+  // 1. Сначала получаем информацию об уроке, чтобы узнать student_id
+  const { data: lesson } = await supabase
+    .from('tutor_lessons')
+    .select('student_id')
+    .eq('id', lessonId)
+    .single();
+
+  if (!lesson) throw new Error("Урок не найден");
+
+  // 2. Завершаем урок (это спишет баланс через RPC)
   const { error } = await supabase.rpc('rpc_complete_lesson', { 
     p_lesson_id: lessonId, 
     p_topic: topic 
   });
   if (error) throw error;
+
+  // 3. Создаем запись в журнале транзакций
+  const { error: txError } = await supabase
+    .from('transactions')
+    .insert({
+      student_id: lesson.student_id,
+      amount: -1, // списание 1 урока
+      reason: `Урок проведен: ${topic}`
+    });
+  
+  if (txError) {
+    console.error("Не удалось создать запись в журнале:", txError);
+    // Не выбрасываем ошибку, чтобы не сломать завершение урока
+  }
 }
 
 export async function deleteStudent(studentId: string) {
