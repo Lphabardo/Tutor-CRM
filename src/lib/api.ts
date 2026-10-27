@@ -166,9 +166,7 @@ export async function addStudent(telegramId: number, fullName: string) {
   return data;
 }
 
-// === ИЗМЕНЕНИЕ 1: Теперь записываем каждое изменение в таблицу transactions ===
 export async function adjustBalance(studentId: string, amount: number, reason: string) {
-  // 1. Меняем баланс
   const { error: rpcError } = await supabase.rpc('rpc_adjust_balance', { 
     p_student_id: studentId, 
     p_amount: amount, 
@@ -176,25 +174,23 @@ export async function adjustBalance(studentId: string, amount: number, reason: s
   });
   if (rpcError) throw rpcError;
 
-  // 2. Делаем запись в журнале операций
   const { error: txError } = await supabase
     .from('transactions')
     .insert({
       student_id: studentId,
-      amount: amount, // положительное или отрицательное число
+      amount: amount,
       reason: reason
     });
   
   if (txError) throw txError;
 }
 
-// === ИЗМЕНЕНИЕ 2: Новая функция для получения истории операций ученика ===
 export async function getStudentTransactions(studentId: string) {
   const { data, error } = await supabase
     .from('transactions')
     .select('*')
     .eq('student_id', studentId)
-    .order('created_at', { ascending: false }); // Сначала новые записи
+    .order('created_at', { ascending: false });
   
   if (error) throw error;
   return data;
@@ -378,6 +374,7 @@ export async function deleteStudent(studentId: string) {
   if (error) throw error;
 }
 
+// === ИСПРАВЛЕНО: Даем "окно" в 2 часа, чтобы опоздавший ученик всё ещё видел урок ===
 export async function getMyNextLesson(telegramId: string) {
   const { data: profile, error: profileError } = await supabase
     .from('tutor_profiles')
@@ -388,12 +385,15 @@ export async function getMyNextLesson(telegramId: string) {
   
   if (profileError || !profile) return null;
 
+  // Смотрим на 2 часа назад, чтобы карточка не исчезала при опоздании
+  const gracePeriod = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
   const { data, error } = await supabase
     .from('tutor_lessons')
     .select('*')
     .eq('student_id', profile.id)
     .eq('status', 'scheduled')
-    .gte('start_time', new Date().toISOString())
+    .gte('start_time', gracePeriod) 
     .order('start_time', { ascending: true })
     .limit(1)
     .single();
