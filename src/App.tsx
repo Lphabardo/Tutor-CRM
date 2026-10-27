@@ -82,7 +82,6 @@ function StudentsTab() {
   const [newTelegramId, setNewTelegramId] = useState('');
   const [newName, setNewName] = useState('');
 
-  // === НОВОЕ: Состояние для истории операций ===
   const [viewingHistoryFor, setViewingHistoryFor] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [txLoading, setTxLoading] = useState(false);
@@ -126,14 +125,27 @@ function StudentsTab() {
     }
   };
 
-  const handleBalanceChange = async (studentId: string, amount: number, reason: string) => {
+  // === НОВОЕ: Универсальная функция изменения баланса с вводом числа ===
+  const handleCustomBalanceChange = async (studentId: string, action: 'add' | 'subtract') => {
+    const amountStr = prompt(action === 'add' ? "Сколько уроков добавить?" : "Сколько уроков списать?");
+    if (amountStr === null) return; // Пользователь нажал "Отмена"
+    
+    const amount = parseInt(amountStr);
+    if (isNaN(amount) || amount <= 0) {
+      alert("Пожалуйста, введите корректное число больше 0");
+      return;
+    }
+
+    const finalAmount = action === 'add' ? amount : -amount;
+    const reason = action === 'add' ? 'Пополнение баланса' : 'Списание урока';
+
     try { 
-      await adjustBalance(studentId, amount, reason); 
+      await adjustBalance(studentId, finalAmount, reason); 
       await loadStudents(); 
-      // Если история открыта для этого ученика, обновим её
       if (viewingHistoryFor === studentId) {
         loadTransactions(studentId);
       }
+      alert(`Успешно: ${action === 'add' ? 'Добавлено' : 'Списано'} ${amount} уроков`);
     } catch (err: any) { 
       alert('Ошибка: ' + err.message); 
     }
@@ -224,11 +236,27 @@ function StudentsTab() {
                   <p className="text-xs text-gray-500">уроков</p>
                 </div>
               </div>
+              
+              {/* === НОВЫЕ КНОПКИ БАЛАНСА === */}
               <div className="flex gap-2 mt-3 flex-wrap">
-                <button onClick={() => handleBalanceChange(student.id, 1, 'Пополнение')} className="flex-1 bg-green-500 text-white py-2 rounded text-sm">+1</button>
-                <button onClick={() => handleBalanceChange(student.id, -1, 'Списание')} className="flex-1 bg-red-500 text-white py-2 rounded text-sm">-1</button>
-                <button onClick={() => handleBalanceChange(student.id, 5, 'Пакет')} className="flex-1 bg-blue-500 text-white py-2 rounded text-sm">+5</button>
-                <button onClick={() => handleDeleteStudent(student.id, student.full_name)} className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm border border-red-200">🗑</button>
+                <button 
+                  onClick={() => handleCustomBalanceChange(student.id, 'add')} 
+                  className="flex-1 bg-green-500 text-white py-2 rounded text-sm font-medium"
+                >
+                  💳 Пополнить
+                </button>
+                <button 
+                  onClick={() => handleCustomBalanceChange(student.id, 'subtract')} 
+                  className="flex-1 bg-red-500 text-white py-2 rounded text-sm font-medium"
+                >
+                  ➖ Списать
+                </button>
+                <button 
+                  onClick={() => handleDeleteStudent(student.id, student.full_name)} 
+                  className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm border border-red-200"
+                >
+                  🗑 Удалить
+                </button>
               </div>
               
               <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-3 gap-2">
@@ -539,20 +567,31 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [rulesText, setRulesText] = useState(user.rules_text || "Загрузка правил...");
+  
+  // === НОВОЕ: Состояние для истории ученика ===
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [txLoading, setTxLoading] = useState(true);
 
   useEffect(() => {
     const fetchNextLesson = async () => {
       try { 
         const lesson = await getMyNextLesson(telegramId); 
         setNextLesson(lesson); 
-      } catch (err) { 
-        console.error(err); 
-      } finally { 
-        setLoading(false); 
-      }
+      } catch (err) { console.error(err); } finally { setLoading(false); }
     };
     fetchNextLesson();
   }, [telegramId]);
+
+  // === НОВОЕ: Загружаем историю операций при входе ===
+  useEffect(() => {
+    const fetchTransactions = async () => {
+      try {
+        const data = await getStudentTransactions(user.id);
+        setTransactions(data || []);
+      } catch (err) { console.error(err); } finally { setTxLoading(false); }
+    };
+    fetchTransactions();
+  }, [user.id]);
 
   useEffect(() => {
     if (!nextLesson) return;
@@ -656,6 +695,32 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
         <div className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
           {rulesText || "Правила не загружены"}
         </div>
+      </div>
+
+      {/* === НОВОЕ: Карточка истории операций для ученика === */}
+      <div className="bg-white p-6 rounded-xl shadow">
+        <h3 className="font-bold text-lg mb-3">📜 История баланса</h3>
+        {txLoading ? (
+          <p className="text-gray-500 text-sm">Загрузка...</p>
+        ) : transactions.length === 0 ? (
+          <p className="text-gray-500 text-sm">Операций пока нет</p>
+        ) : (
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {transactions.map((tx: any) => (
+              <div key={tx.id} className="flex justify-between items-center text-sm bg-gray-50 p-3 rounded">
+                <div>
+                  <p className="font-medium text-gray-800">{tx.reason}</p>
+                  <p className="text-xs text-gray-500">
+                    {new Date(tx.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+                <span className={`font-bold ${tx.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {tx.amount > 0 ? '+' : ''}{tx.amount}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
