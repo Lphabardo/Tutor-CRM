@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent, calculateEarnings, updateTeacherRules, getFeedbacks, sendFeedback, generateRecurringLessons, getTeacherRules } from './lib/api';
+import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent, calculateEarnings, updateTeacherRules, getFeedbacks, sendFeedback, generateRecurringLessons, getTeacherRules, getStudentTransactions } from './lib/api';
 import OnboardingForm from './components/OnboardingForm';
 
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
@@ -82,6 +82,11 @@ function StudentsTab() {
   const [newTelegramId, setNewTelegramId] = useState('');
   const [newName, setNewName] = useState('');
 
+  // === НОВОЕ: Состояние для истории операций ===
+  const [viewingHistoryFor, setViewingHistoryFor] = useState<string | null>(null);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [txLoading, setTxLoading] = useState(false);
+
   const loadStudents = async () => {
     try { 
       const data = await getStudents(); 
@@ -94,6 +99,18 @@ function StudentsTab() {
   };
 
   useEffect(() => { loadStudents(); }, []);
+
+  const loadTransactions = async (studentId: string) => {
+    setTxLoading(true);
+    try {
+      const data = await getStudentTransactions(studentId);
+      setTransactions(data || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTxLoading(false);
+    }
+  };
 
   const handleAddStudent = async () => {
     if (!newTelegramId || !newName) return;
@@ -113,6 +130,10 @@ function StudentsTab() {
     try { 
       await adjustBalance(studentId, amount, reason); 
       await loadStudents(); 
+      // Если история открыта для этого ученика, обновим её
+      if (viewingHistoryFor === studentId) {
+        loadTransactions(studentId);
+      }
     } catch (err: any) { 
       alert('Ошибка: ' + err.message); 
     }
@@ -191,46 +212,91 @@ function StudentsTab() {
       )}
       {students.length === 0 ? <p className="text-center text-gray-500">Учеников пока нет</p> : (
         students.map(student => (
-          <div key={student.id} className={`bg-white p-4 rounded-lg mb-3 shadow ${student.is_new ? 'border-l-4 border-yellow-400' : ''}`}>
-            <div className="flex justify-between items-start mb-2">
-              <div>
-                <h3 className="font-bold text-lg">{student.full_name}</h3>
-                <p className="text-sm text-gray-500">ID: {student.telegram_id}</p>
+          <div key={student.id}>
+            <div className={`bg-white p-4 rounded-lg mb-3 shadow ${student.is_new ? 'border-l-4 border-yellow-400' : ''}`}>
+              <div className="flex justify-between items-start mb-2">
+                <div>
+                  <h3 className="font-bold text-lg">{student.full_name}</h3>
+                  <p className="text-sm text-gray-500">ID: {student.telegram_id}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-bold text-blue-600">{student.balance}</p>
+                  <p className="text-xs text-gray-500">уроков</p>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-2xl font-bold text-blue-600">{student.balance}</p>
-                <p className="text-xs text-gray-500">уроков</p>
+              <div className="flex gap-2 mt-3 flex-wrap">
+                <button onClick={() => handleBalanceChange(student.id, 1, 'Пополнение')} className="flex-1 bg-green-500 text-white py-2 rounded text-sm">+1</button>
+                <button onClick={() => handleBalanceChange(student.id, -1, 'Списание')} className="flex-1 bg-red-500 text-white py-2 rounded text-sm">-1</button>
+                <button onClick={() => handleBalanceChange(student.id, 5, 'Пакет')} className="flex-1 bg-blue-500 text-white py-2 rounded text-sm">+5</button>
+                <button onClick={() => handleDeleteStudent(student.id, student.full_name)} className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm border border-red-200">🗑</button>
               </div>
+              
+              <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-3 gap-2">
+                <button 
+                  onClick={() => handleUpdateSettings(student.id, student.price_per_lesson, student.meet_link, student.google_doc_url)} 
+                  className="bg-purple-50 text-purple-700 py-2 rounded text-xs border border-purple-200"
+                >
+                  ⚙️ Настройки
+                </button>
+                <button 
+                  onClick={() => handleUpdateSchedule(student.id, student.fixed_schedule || '')} 
+                  className="bg-orange-50 text-orange-700 py-2 rounded text-xs border border-orange-200"
+                >
+                  📅 Расписание
+                </button>
+                <button 
+                  onClick={() => {
+                    if (viewingHistoryFor === student.id) {
+                      setViewingHistoryFor(null);
+                    } else {
+                      setViewingHistoryFor(student.id);
+                      loadTransactions(student.id);
+                    }
+                  }} 
+                  className={`py-2 rounded text-xs border ${viewingHistoryFor === student.id ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-700 border-gray-200'}`}
+                >
+                  📜 История
+                </button>
+              </div>
+              
+              {student.fixed_schedule && (
+                <button 
+                  onClick={() => handleGenerateLessons(student.id)} 
+                  className="w-full mt-2 bg-teal-50 text-teal-700 py-2 rounded text-xs border border-teal-200 font-medium hover:bg-teal-100 transition"
+                >
+                  📅 Сгенерировать уроки на 4 недели →
+                </button>
+              )}
             </div>
-            <div className="flex gap-2 mt-3 flex-wrap">
-              <button onClick={() => handleBalanceChange(student.id, 1, 'Пополнение')} className="flex-1 bg-green-500 text-white py-2 rounded text-sm">+1</button>
-              <button onClick={() => handleBalanceChange(student.id, -1, 'Списание')} className="flex-1 bg-red-500 text-white py-2 rounded text-sm">-1</button>
-              <button onClick={() => handleBalanceChange(student.id, 5, 'Пакет')} className="flex-1 bg-blue-500 text-white py-2 rounded text-sm">+5</button>
-              <button onClick={() => handleDeleteStudent(student.id, student.full_name)} className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm border border-red-200">🗑</button>
-            </div>
-            
-            <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-2">
-              <button 
-                onClick={() => handleUpdateSettings(student.id, student.price_per_lesson, student.meet_link, student.google_doc_url)} 
-                className="bg-purple-50 text-purple-700 py-2 rounded text-xs border border-purple-200"
-              >
-                ⚙️ Настройки
-              </button>
-              <button 
-                onClick={() => handleUpdateSchedule(student.id, student.fixed_schedule || '')} 
-                className="bg-orange-50 text-orange-700 py-2 rounded text-xs border border-orange-200"
-              >
-                📅 Расписание
-              </button>
-            </div>
-            
-            {student.fixed_schedule && (
-              <button 
-                onClick={() => handleGenerateLessons(student.id)} 
-                className="w-full mt-2 bg-teal-50 text-teal-700 py-2 rounded text-xs border border-teal-200 font-medium hover:bg-teal-100 transition"
-              >
-                📅 Сгенерировать уроки на 4 недели →
-              </button>
+
+            {/* === БЛОК ИСТОРИИ ОПЕРАЦИЙ === */}
+            {viewingHistoryFor === student.id && (
+              <div className="bg-gray-50 p-4 rounded-lg mb-3 border border-gray-200">
+                <h4 className="font-bold text-sm mb-2 text-gray-700">История операций: {student.full_name}</h4>
+                {txLoading ? (
+                  <p className="text-sm text-gray-500">Загрузка...</p>
+                ) : transactions.length === 0 ? (
+                  <p className="text-sm text-gray-500">Операций пока нет</p>
+                ) : (
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {transactions.map((tx: any) => (
+                      <div key={tx.id} className="flex justify-between items-center text-sm bg-white p-3 rounded shadow-sm">
+                        <div>
+                          <p className="font-medium text-gray-800">{tx.reason}</p>
+                          <p className="text-xs text-gray-500">
+                            {new Date(tx.created_at).toLocaleString('ru-RU', { 
+                              day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' 
+                            })}
+                          </p>
+                        </div>
+                        <span className={`font-bold ${tx.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {tx.amount > 0 ? '+' : ''}{tx.amount}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         ))
@@ -398,7 +464,6 @@ function FinanceTab() {
   );
 }
 
-// === ИСПРАВЛЕНО: Чтение правил строго из профиля преподавателя ===
 function SettingsTab() {
   const [rules, setRules] = useState('');
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
@@ -407,7 +472,6 @@ function SettingsTab() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        // Теперь читаем правила надежно, а не из первого попавшегося ученика
         const savedRules = await getTeacherRules();
         setRules(savedRules || `Правила переноса и отмены занятий:
 1. Неявка без уведомления = урок проведен.

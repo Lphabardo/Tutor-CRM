@@ -103,7 +103,6 @@ export async function authenticateUser() {
     };
   }
 
-  // === ИЗМЕНЕНИЕ 1: При регистрации нового ученика сразу подтягиваем правила преподавателя ===
   const { data: tutorRules } = await supabase.from('tutor_profiles').select('rules_text').eq('role', 'tutor').single();
 
   const { data: newUser, error: insertError } = await supabase
@@ -118,7 +117,7 @@ export async function authenticateUser() {
       google_doc_url: null,
       price_per_lesson: 0,
       fixed_schedule: '',
-      rules_text: tutorRules?.rules_text || '' // <-- Сохраняем актуальные правила
+      rules_text: tutorRules?.rules_text || ''
     }])
     .select()
     .single();
@@ -147,7 +146,6 @@ export async function getStudents() {
 }
 
 export async function addStudent(telegramId: number, fullName: string) {
-  // === ИЗМЕНЕНИЕ 2: Новый ученик сразу получает правила преподавателя ===
   const { data: tutorRules } = await supabase.from('tutor_profiles').select('rules_text').eq('role', 'tutor').single();
 
   const { data, error } = await supabase
@@ -160,7 +158,7 @@ export async function addStudent(telegramId: number, fullName: string) {
       is_new: true, 
       price_per_lesson: 0, 
       fixed_schedule: '',
-      rules_text: tutorRules?.rules_text || '' // <-- Сохраняем актуальные правила
+      rules_text: tutorRules?.rules_text || ''
     }])
     .select()
     .single();
@@ -168,13 +166,38 @@ export async function addStudent(telegramId: number, fullName: string) {
   return data;
 }
 
+// === ИЗМЕНЕНИЕ 1: Теперь записываем каждое изменение в таблицу transactions ===
 export async function adjustBalance(studentId: string, amount: number, reason: string) {
-  const { error } = await supabase.rpc('rpc_adjust_balance', { 
+  // 1. Меняем баланс
+  const { error: rpcError } = await supabase.rpc('rpc_adjust_balance', { 
     p_student_id: studentId, 
     p_amount: amount, 
     p_reason: reason 
   });
+  if (rpcError) throw rpcError;
+
+  // 2. Делаем запись в журнале операций
+  const { error: txError } = await supabase
+    .from('transactions')
+    .insert({
+      student_id: studentId,
+      amount: amount, // положительное или отрицательное число
+      reason: reason
+    });
+  
+  if (txError) throw txError;
+}
+
+// === ИЗМЕНЕНИЕ 2: Новая функция для получения истории операций ученика ===
+export async function getStudentTransactions(studentId: string) {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('student_id', studentId)
+    .order('created_at', { ascending: false }); // Сначала новые записи
+  
   if (error) throw error;
+  return data;
 }
 
 export async function updateStudentSettings(studentId: string, settings: { price_per_lesson?: number, meet_link?: string, google_doc_url?: string, fixed_schedule?: string }) {
@@ -185,7 +208,6 @@ export async function updateStudentSettings(studentId: string, settings: { price
   if (error) throw error;
 }
 
-// === ИЗМЕНЕНИЕ 3: Новая функция для надежного чтения правил преподавателя ===
 export async function getTeacherRules() {
   const { data, error } = await supabase
     .from('tutor_profiles')
@@ -197,9 +219,7 @@ export async function getTeacherRules() {
 }
 
 export async function updateTeacherRules(rulesText: string) {
-  // 1. Сохраняем у преподавателя
   await supabase.from('tutor_profiles').update({ rules_text: rulesText }).eq('role', 'tutor');
-  // 2. Синхронизируем со всеми студентами
   await supabase.from('tutor_profiles').update({ rules_text: rulesText }).eq('role', 'student');
 }
 
