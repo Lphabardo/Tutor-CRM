@@ -29,7 +29,8 @@ export async function authenticateUser() {
       language: null,
       google_doc_url: null,
       price_per_lesson: 0,
-      fixed_schedule: ''
+      fixed_schedule: '',
+      rules_text: ''
     };
   }
 
@@ -77,7 +78,8 @@ export async function authenticateUser() {
           language: data.language,
           google_doc_url: data.google_doc_url,
           price_per_lesson: data.price_per_lesson || 0,
-          fixed_schedule: data.fixed_schedule || ''
+          fixed_schedule: data.fixed_schedule || '',
+          rules_text: data.rules_text || ''
         };
       }
     } catch (err) { console.error("Ошибка проверки initData:", err); }
@@ -96,9 +98,13 @@ export async function authenticateUser() {
       telegram_id: telegramId,
       user_id: existingUser.id,
       price_per_lesson: existingUser.price_per_lesson || 0,
-      fixed_schedule: existingUser.fixed_schedule || ''
+      fixed_schedule: existingUser.fixed_schedule || '',
+      rules_text: existingUser.rules_text || ''
     };
   }
+
+  // === ИЗМЕНЕНИЕ 1: При регистрации нового ученика сразу подтягиваем правила преподавателя ===
+  const { data: tutorRules } = await supabase.from('tutor_profiles').select('rules_text').eq('role', 'tutor').single();
 
   const { data: newUser, error: insertError } = await supabase
     .from('tutor_profiles')
@@ -111,7 +117,8 @@ export async function authenticateUser() {
       language: null,
       google_doc_url: null,
       price_per_lesson: 0,
-      fixed_schedule: ''
+      fixed_schedule: '',
+      rules_text: tutorRules?.rules_text || '' // <-- Сохраняем актуальные правила
     }])
     .select()
     .single();
@@ -124,7 +131,8 @@ export async function authenticateUser() {
     telegram_id: telegramId,
     user_id: newUser.id,
     price_per_lesson: newUser.price_per_lesson || 0,
-    fixed_schedule: newUser.fixed_schedule || ''
+    fixed_schedule: newUser.fixed_schedule || '',
+    rules_text: newUser.rules_text || ''
   };
 }
 
@@ -139,9 +147,21 @@ export async function getStudents() {
 }
 
 export async function addStudent(telegramId: number, fullName: string) {
+  // === ИЗМЕНЕНИЕ 2: Новый ученик сразу получает правила преподавателя ===
+  const { data: tutorRules } = await supabase.from('tutor_profiles').select('rules_text').eq('role', 'tutor').single();
+
   const { data, error } = await supabase
     .from('tutor_profiles')
-    .insert([{ telegram_id: telegramId, full_name: fullName, role: 'student', balance: 0, is_new: true, price_per_lesson: 0, fixed_schedule: '' }])
+    .insert([{ 
+      telegram_id: telegramId, 
+      full_name: fullName, 
+      role: 'student', 
+      balance: 0, 
+      is_new: true, 
+      price_per_lesson: 0, 
+      fixed_schedule: '',
+      rules_text: tutorRules?.rules_text || '' // <-- Сохраняем актуальные правила
+    }])
     .select()
     .single();
   if (error) throw error;
@@ -165,11 +185,21 @@ export async function updateStudentSettings(studentId: string, settings: { price
   if (error) throw error;
 }
 
+// === ИЗМЕНЕНИЕ 3: Новая функция для надежного чтения правил преподавателя ===
+export async function getTeacherRules() {
+  const { data, error } = await supabase
+    .from('tutor_profiles')
+    .select('rules_text')
+    .eq('role', 'tutor')
+    .single();
+  if (error) throw error;
+  return data?.rules_text || '';
+}
+
 export async function updateTeacherRules(rulesText: string) {
-  const { data: tutor } = await supabase.from('tutor_profiles').select('id').eq('role', 'tutor').single();
-  if (tutor) {
-     await supabase.from('tutor_profiles').update({ rules_text: rulesText }).eq('id', tutor.id);
-  }
+  // 1. Сохраняем у преподавателя
+  await supabase.from('tutor_profiles').update({ rules_text: rulesText }).eq('role', 'tutor');
+  // 2. Синхронизируем со всеми студентами
   await supabase.from('tutor_profiles').update({ rules_text: rulesText }).eq('role', 'student');
 }
 
@@ -220,7 +250,6 @@ export async function createLesson(studentId: string, startTime: string, topic: 
   return data;
 }
 
-// === ГЕНЕРАТОР РАСПИСАНИЯ ===
 export async function generateRecurringLessons(studentId: string, weeks: number = 4) {
   const { data: student, error: sErr } = await supabase
     .from('tutor_profiles')

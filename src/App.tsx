@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent, calculateEarnings, updateTeacherRules, getFeedbacks, sendFeedback, generateRecurringLessons } from './lib/api';
+import { authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent, calculateEarnings, updateTeacherRules, getFeedbacks, sendFeedback, generateRecurringLessons, getTeacherRules } from './lib/api';
 import OnboardingForm from './components/OnboardingForm';
 
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
@@ -150,7 +150,6 @@ function StudentsTab() {
     }
   };
 
-  // === НОВОЕ: Обновление расписания ===
   const handleUpdateSchedule = async (studentId: string, currentSchedule: string) => {
     const newSchedule = prompt("Формат: Пн 15:00, Ср 10:00", currentSchedule);
     if (newSchedule === null) return;
@@ -163,7 +162,6 @@ function StudentsTab() {
     }
   };
 
-  // === НОВОЕ: Генерация уроков ===
   const handleGenerateLessons = async (studentId: string) => {
     const weeksStr = prompt("На сколько недель вперёд создать уроки?", "4");
     if (!weeksStr) return;
@@ -211,7 +209,6 @@ function StudentsTab() {
               <button onClick={() => handleDeleteStudent(student.id, student.full_name)} className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm border border-red-200">🗑</button>
             </div>
             
-            {/* === НОВЫЕ КНОПКИ ДЛЯ РАСПИСАНИЯ === */}
             <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-2">
               <button 
                 onClick={() => handleUpdateSettings(student.id, student.price_per_lesson, student.meet_link, student.google_doc_url)} 
@@ -401,6 +398,7 @@ function FinanceTab() {
   );
 }
 
+// === ИСПРАВЛЕНО: Чтение правил строго из профиля преподавателя ===
 function SettingsTab() {
   const [rules, setRules] = useState('');
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
@@ -408,11 +406,10 @@ function SettingsTab() {
 
   useEffect(() => {
     const loadData = async () => {
-      const students = await getStudents();
-      if (students.length > 0 && students[0].rules_text) {
-        setRules(students[0].rules_text);
-      } else {
-        setRules(`Правила переноса и отмены занятий:
+      try {
+        // Теперь читаем правила надежно, а не из первого попавшегося ученика
+        const savedRules = await getTeacherRules();
+        setRules(savedRules || `Правила переноса и отмены занятий:
 1. Неявка без уведомления = урок проведен.
 2. Отмена < 3 часов = урок проведен.
 3. Отмена преподавателем = след. урок бесплатно.
@@ -420,7 +417,10 @@ function SettingsTab() {
 5. Отмена 1 раз в месяц.
 
 Оплата заранее пакетами.`);
+      } catch (err) {
+        console.error("Ошибка загрузки правил:", err);
       }
+      
       const feedbacksData = await getFeedbacks();
       setFeedbacks(feedbacksData);
       setLoading(false);
