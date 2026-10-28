@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-       "build": "vite build",
+    "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postdeploy": "curl -s -X POST 'https://api.telegram.org/bot8930796552:AAGaXKS89TcPsz7vrkZeSQbWxwYL18gSry0/setWebhook' -H 'Content-Type: application/json' -d '{\"url\": \"https://tutor-bot-webhook.lphabardo.workers.dev\"}'"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
