@@ -277,7 +277,7 @@ export async function generateRecurringLessons(studentId: string, weeks: number 
   if (!student.fixed_schedule?.trim()) throw new Error("Сначала укажите расписание в настройках ученика");
 
   const dayMap: Record<string, number> = { 'Пн': 1, 'Вт': 2, 'Ср': 3, 'Чт': 4, 'Пт': 5, 'Сб': 6, 'Вс': 0 };
-  const slots = student.fixed_schedule.split(',').map(s => s.trim()).filter(Boolean);
+  const slots = student.fixed_schedule.split(',').map((s: string) => s.trim()).filter(Boolean);
   const now = new Date(); 
   now.setHours(0, 0, 0, 0);
   const endDate = new Date(now); 
@@ -467,4 +467,52 @@ export async function calculateEarnings(startDate: string, endDate: string) {
   });
 
   return { totalSum, count: data.length, details: earningsDetails };
+}
+
+// === НОВЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С РЕКВИЗИТАМИ (ШАГ 4) ===
+
+// 1. Получить все настройки оплаты (для ученика и учителя)
+export async function getPaymentSettings() {
+  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://lxaatqgcfsrvycanbelm.supabase.co";
+  const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4YWF0cWdjZnNydnljYW5iZWxtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjU0ODIsImV4cCI6MjA5NjQwMTQ4Mn0.z-Pl30UQh-3GPrE6ezztZngP3fjm_vIwm9IpYkX1zfA";
+
+  try {
+    // Запрашиваем все записи (и активные, и неактивные, чтобы учитель мог видеть всё), сортируем по имени банка
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/teacher_payment_settings?order=bank_name.asc`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`
+      }
+    });
+
+    if (!response.ok) throw new Error('Ошибка загрузки настроек оплаты');
+    return await response.json();
+  } catch (error) {
+    console.error("Ошибка getPaymentSettings:", error);
+    return []; // Возвращаем пустой массив при ошибке
+  }
+}
+
+// 2. Обновить настройку оплаты (для учителя)
+export async function updatePaymentSetting(id: string, data: any) {
+  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://lxaatqgcfsrvycanbelm.supabase.co";
+  const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4YWF0cWdjZnNydnljYW5iZWxtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjU0ODIsImV4cCI6MjA5NjQwMTQ4Mn0.z-Pl30UQh-3GPrE6ezztZngP3fjm_vIwm9IpYkX1zfA";
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/teacher_payment_settings?id=eq.${id}`, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) throw new Error('Ошибка сохранения настроек');
+    return await response.json();
+  } catch (error) {
+    console.error("Ошибка updatePaymentSetting:", error);
+    throw error;
+  }
 }
