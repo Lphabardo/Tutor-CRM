@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { supabase } from './supabase';
 import {
   authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson,
   cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent,
