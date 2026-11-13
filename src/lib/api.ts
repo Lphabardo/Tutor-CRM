@@ -232,8 +232,6 @@ export async function sendFeedback(studentName: string, message: string) {
   await supabase.from('student_feedback').insert({ student_name: studentName, message });
 
   const text = `💬 НОВЫЙ ОТЗЫВ!\n\nОт: ${studentName}\nСообщение:\n${message}`;
-  // Эта функция может не работать в Непале из-за блокировки Telegram API
-  // Но это не критично для основной функциональности
   try {
     await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: 'POST',
@@ -242,7 +240,6 @@ export async function sendFeedback(studentName: string, message: string) {
     });
   } catch (err) {
     console.error("Не удалось отправить уведомление в Telegram:", err);
-    // Не выбрасываем ошибку, чтобы не ломать отправку отзыва
   }
 }
 
@@ -365,9 +362,7 @@ export async function cancelLesson(lessonId: string, hasValidReason: boolean = f
   return data;
 }
 
-// === ИСПРАВЛЕНО: Теперь при завершении урока создается запись в журнале транзакций ===
 export async function completeLesson(lessonId: string, topic: string) {
-  // 1. Сначала получаем информацию об уроке, чтобы узнать student_id
   const { data: lesson } = await supabase
     .from('tutor_lessons')
     .select('student_id')
@@ -376,25 +371,22 @@ export async function completeLesson(lessonId: string, topic: string) {
 
   if (!lesson) throw new Error("Урок не найден");
 
-  // 2. Завершаем урок (это спишет баланс через RPC)
   const { error } = await supabase.rpc('rpc_complete_lesson', { 
     p_lesson_id: lessonId, 
     p_topic: topic 
   });
   if (error) throw error;
 
-  // 3. Создаем запись в журнале транзакций
   const { error: txError } = await supabase
     .from('transactions')
     .insert({
       student_id: lesson.student_id,
-      amount: -1, // списание 1 урока
+      amount: -1,
       reason: `Урок проведен: ${topic}`
     });
   
   if (txError) {
     console.error("Не удалось создать запись в журнале:", txError);
-    // Не выбрасываем ошибку, чтобы не сломать завершение урока
   }
 }
 
@@ -406,7 +398,6 @@ export async function deleteStudent(studentId: string) {
   if (error) throw error;
 }
 
-// === ИСПРАВЛЕНО: Даем "окно" в 2 часа, чтобы опоздавший ученик всё ещё видел урок ===
 export async function getMyNextLesson(telegramId: string) {
   const { data: profile, error: profileError } = await supabase
     .from('tutor_profiles')
@@ -417,7 +408,6 @@ export async function getMyNextLesson(telegramId: string) {
   
   if (profileError || !profile) return null;
 
-  // Смотрим на 2 часа назад, чтобы карточка не исчезала при опоздании
   const gracePeriod = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
@@ -476,9 +466,6 @@ export async function calculateEarnings(startDate: string, endDate: string) {
   return { totalSum, count: data.length, details: earningsDetails };
 }
 
-// === ИСПРАВЛЕНО: Функции для работы с реквизитами теперь используют клиент Supabase ===
-
-// 1. Получить все настройки оплаты (для ученика и учителя)
 export async function getPaymentSettings() {
   try {
     const { data, error } = await supabase
@@ -494,7 +481,6 @@ export async function getPaymentSettings() {
   }
 }
 
-// 2. Обновить настройку оплаты (для учителя)
 export async function updatePaymentSetting(id: string, data: any) {
   try {
     const { error } = await supabase
@@ -508,4 +494,45 @@ export async function updatePaymentSetting(id: string, data: any) {
     console.error("Ошибка updatePaymentSetting:", error);
     throw error;
   }
+}
+
+// === НОВАЯ ФУНКЦИЯ: Отправка отчета об оплате ===
+export async function sendPaymentReport(studentId: string, studentName: string, amount: number, lessonsCount: number, paymentDate: string) {
+  // 1. Сохраняем отчет в базу данных
+  const { error: dbError } = await supabase
+    .from('payment_reports')
+    .insert([{
+      student_id: studentId,
+      student_name: studentName,
+      amount: amount,
+      lessons_count: lessonsCount,
+      payment_date: paymentDate,
+      status: 'pending'
+    }]);
+
+  if (dbError) {
+    console.error("Ошибка сохранения отчета в базу:", dbError);
+    throw dbError;
+  }
+
+  // 2. Пытаемся отправить уведомление в Telegram
+  const message = `💰 <b>НОВАЯ ОПЛАТА!</b>\n\n👤 <b>От:</b> ${studentName}\n💵 <b>Сумма:</b> ${amount} грн\n <b>Уроков:</b> ${lessonsCount}\n📅 <b>Дата:</b> ${paymentDate}\n\n<i>Зайдите в кабинет, чтобы подтвердить и начислить уроки.</i>`;
+
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TEACHER_CHAT_ID,
+        text: message,
+        parse_mode: 'HTML'
+      })
+    });
+    console.log("Уведомление отправлено в Telegram!");
+  } catch (err) {
+    console.warn("Не удалось отправить уведомление в Telegram:", err);
+    // Не выбрасываем ошибку, главное что данные в базе
+  }
+
+  return { success: true };
 }

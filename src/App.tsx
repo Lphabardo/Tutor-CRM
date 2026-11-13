@@ -3,7 +3,7 @@ import {
   authenticateUser, getStudents, addStudent, adjustBalance, getAllLessons, createLesson, 
   cancelLesson, completeLesson, getMyNextLesson, updateStudentSettings, deleteStudent, 
   calculateEarnings, updateTeacherRules, getFeedbacks, sendFeedback, generateRecurringLessons, 
-  getTeacherRules, getStudentTransactions, getPaymentSettings, updatePaymentSetting 
+  getTeacherRules, getStudentTransactions, getPaymentSettings, updatePaymentSetting, sendPaymentReport 
 } from './lib/api';
 import OnboardingForm from './components/OnboardingForm';
 
@@ -44,7 +44,7 @@ function App() {
       <div className="bg-white p-4 shadow-sm sticky top-0 z-10">
         <h1 className="text-xl font-bold">Привет, {user.full_name}! 👋</h1>
         <p className="text-sm text-gray-500 mt-1">
-          {user.role === 'tutor' ? '‍🏫 Преподаватель' : '👨‍🎓 Ученик'} | ID: {user.telegram_id}
+          {user.role === 'tutor' ? '👨‍ Преподаватель' : '‍🎓 Ученик'} | ID: {user.telegram_id}
         </p>
       </div>
 
@@ -65,7 +65,7 @@ function TutorDashboard({ activeTab, setActiveTab }: { activeTab: string, setAct
         <button onClick={() => setActiveTab('lessons')} className={`flex-1 py-3 font-semibold text-sm whitespace-nowrap ${activeTab === 'lessons' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>Расписание</button>
         <button onClick={() => setActiveTab('finance')} className={`flex-1 py-3 font-semibold text-sm whitespace-nowrap ${activeTab === 'finance' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500'}`}>Финансы 💰</button>
         <button onClick={() => setActiveTab('payment')} className={`flex-1 py-3 font-semibold text-sm whitespace-nowrap ${activeTab === 'payment' ? 'text-purple-600 border-b-2 border-purple-600' : 'text-gray-500'}`}>Реквизиты 💳</button>
-        <button onClick={() => setActiveTab('settings')} className={`flex-1 py-3 font-semibold text-sm whitespace-nowrap ${activeTab === 'settings' ? 'text-gray-800 border-b-2 border-gray-800' : 'text-gray-500'}`}>Настройки ️</button>
+        <button onClick={() => setActiveTab('settings')} className={`flex-1 py-3 font-semibold text-sm whitespace-nowrap ${activeTab === 'settings' ? 'text-gray-800 border-b-2 border-gray-800' : 'text-gray-500'}`}>Настройки ⚙️</button>
       </div>
       
       {activeTab === 'students' ? <StudentsTab /> : 
@@ -114,8 +114,6 @@ function PaymentSettingsTab() {
     setSaving(true);
     setSaveMessage('');
     try {
-      // Сохраняем только измененные поля или все? Для простоты сохраняем текущее состояние каждой записи
-      // В реальном проекте лучше отслеживать dirty fields, но здесь обновим всё
       for (const item of settings) {
         await updatePaymentSetting(item.id, {
           is_active: item.is_active,
@@ -244,7 +242,6 @@ function PaymentSettingsTab() {
 }
 
 // Остальные компоненты (StudentsTab, LessonsTab, FinanceTab, SettingsTab) остаются без изменений
-// Для краткости я использую сокращенную версию, но в твоем файле они должны быть полными как раньше
 function StudentsTab() {
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -283,7 +280,7 @@ function StudentsTab() {
                 <button onClick={() => handleDeleteStudent(student.id, student.full_name)} className="flex-1 bg-gray-100 text-red-500 py-2 rounded text-sm border border-red-200">Удалить </button>
               </div>
               <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-3 gap-2">
-                <button onClick={() => handleUpdateSettings(student.id, student.price_per_lesson, student.meet_link, student.google_doc_url)} className="bg-purple-50 text-purple-700 py-2 rounded text-xs border border-purple-200">Настройки ⚙️</button>
+                <button onClick={() => handleUpdateSettings(student.id, student.price_per_lesson, student.meet_link, student.google_doc_url)} className="bg-purple-50 text-purple-700 py-2 rounded text-xs border border-purple-200">Настройки ️</button>
                 <button onClick={() => handleUpdateSchedule(student.id, student.fixed_schedule || '')} className="bg-orange-50 text-orange-700 py-2 rounded text-xs border border-orange-200">Расписание 📅</button>
                 <button onClick={() => { if (viewingHistoryFor === student.id) { setViewingHistoryFor(null); } else { setViewingHistoryFor(student.id); loadTransactions(student.id); } }} className={`py-2 rounded text-xs border ${viewingHistoryFor === student.id ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-700 border-gray-200'}`}>История 📜</button>
               </div>
@@ -326,21 +323,21 @@ function LessonsTab() {
   const handleCreateLesson = async () => { if (!selectedStudent || !lessonDate || !lessonTime) return; try { await createLesson(selectedStudent, new Date(`${lessonDate}T${lessonTime}:00`).toISOString(), lessonTopic); setLessonDate(''); setLessonTime(''); setLessonTopic(''); setSelectedStudent(''); setShowAddForm(false); await loadLessons(); alert('Урок создан!'); } catch (err: any) { alert('Ошибка: ' + err.message); } };
   const handleCancel = async (lessonId: string) => { if (!confirm('Отменить урок?')) return; const hasValidReason = confirm('Уважительная причина? (ОК=Да, Отмена=Нет)'); try { const result = await cancelLesson(lessonId, hasValidReason, 'tutor'); if (result === 'canceled_free_with_compensation') alert('Отменено (компенсация +1).'); else alert('Отменено бесплатно.'); await loadLessons(); } catch (err: any) { alert('Ошибка: ' + err.message); } };
   const handleComplete = async (lessonId: string) => { const topic = prompt('Тема урока:'); if (!topic) return; try { await completeLesson(lessonId, topic); await loadLessons(); alert('Урок завершен!'); } catch (err: any) { alert('Ошибка: ' + err.message); } };
-  const getStatusText = (status: string) => { const map: any = { 'scheduled': '🕒 Запланирован', 'completed': '✅ Проведен', 'canceled_free': ' Отменен (бесплатно)', 'canceled_paid': '❌ Отменен (списан)' }; return map[status] || status; };
+  const getStatusText = (status: string) => { const map: any = { 'scheduled': '🕒 Запланирован', 'completed': '✅ Проведен', 'canceled_free': '❌ Отменен (бесплатно)', 'canceled_paid': '❌ Отменен (списан)' }; return map[status] || status; };
   if (loading) return <div className="p-6 text-center">Загрузка...</div>;
   const filteredLessons = showHistory ? lessons : lessons.filter(l => l.status === 'scheduled');
   return (
     <div className="p-4">
       <div className="flex gap-2 mb-4">
         <button onClick={() => setShowAddForm(!showAddForm)} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold">+ Урок</button>
-        <button onClick={() => setShowHistory(!showHistory)} className="px-4 py-3 rounded-lg border bg-white">{showHistory ? 'Скрыть' : 'История 📜'}</button>
+        <button onClick={() => setShowHistory(!showHistory)} className="px-4 py-3 rounded-lg border bg-white">{showHistory ? 'Скрыть' : 'История '}</button>
       </div>
       {showAddForm && (<div className="bg-white p-4 rounded-lg mb-4 shadow"><select value={selectedStudent} onChange={(e) => setSelectedStudent(e.target.value)} className="w-full p-2 border rounded mb-2"><option value="">Ученик</option>{students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}</select><input type="date" value={lessonDate} onChange={(e) => setLessonDate(e.target.value)} className="w-full p-2 border rounded mb-2" /><input type="time" value={lessonTime} onChange={(e) => setLessonTime(e.target.value)} className="w-full p-2 border rounded mb-2" /><input type="text" placeholder="Тема" value={lessonTopic} onChange={(e) => setLessonTopic(e.target.value)} className="w-full p-2 border rounded mb-2" /><button onClick={handleCreateLesson} className="w-full bg-green-600 text-white py-2 rounded">Создать</button></div>)}
       {filteredLessons.length === 0 ? <p className="text-center text-gray-500 py-8">Пусто</p> : (
         filteredLessons.map(lesson => (
           <div key={lesson.id} className="bg-white p-4 rounded-lg mb-3 shadow">
             <div className="flex justify-between items-start mb-2">
-              <div><h3 className="font-bold">{lesson.student?.full_name}</h3><p className="text-sm text-gray-500">{new Date(lesson.start_time).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>{lesson.topic && <p className="text-sm mt-1"> {lesson.topic}</p>}</div>
+              <div><h3 className="font-bold">{lesson.student?.full_name}</h3><p className="text-sm text-gray-500">{new Date(lesson.start_time).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>{lesson.topic && <p className="text-sm mt-1">📚 {lesson.topic}</p>}</div>
               <span className="text-sm font-semibold">{getStatusText(lesson.status)}</span>
             </div>
             {lesson.status === 'scheduled' && (<div className="flex gap-2 mt-3"><button onClick={() => handleComplete(lesson.id)} className="flex-1 bg-green-500 text-white py-2 rounded text-sm">✅</button><button onClick={() => handleCancel(lesson.id)} className="flex-1 bg-red-500 text-white py-2 rounded text-sm">❌</button></div>)}
@@ -397,7 +394,7 @@ function SettingsTab() {
   );
 }
 
-// === ШАГ 4: Обновленный StudentDashboard с загрузкой реальных данных ===
+// === ШАГ 5: Обновленный StudentDashboard с формой отчета об оплате ===
 function StudentDashboard({ telegramId, user }: { telegramId: string, user: any }) {
   const [nextLesson, setNextLesson] = useState<any>(null);
   const [timeLeft, setTimeLeft] = useState<string>('');
@@ -409,7 +406,13 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
   // Состояния для модального окна оплаты
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedBank, setSelectedBank] = useState<any>(null);
-  const [paymentSettings, setPaymentSettings] = useState<any[]>([]); // Реальные данные из БД
+  const [paymentSettings, setPaymentSettings] = useState<any[]>([]); 
+
+  // === НОВОЕ: Состояния для формы отчета об оплате ===
+  const [reportAmount, setReportAmount] = useState('');
+  const [reportLessons, setReportLessons] = useState('');
+  const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]);
+  const [reportSending, setReportSending] = useState(false);
 
   useEffect(() => {
     const fetchNextLesson = async () => { try { const lesson = await getMyNextLesson(telegramId); setNextLesson(lesson); } catch (err) { console.error(err); } finally { setLoading(false); } };
@@ -421,7 +424,6 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
     fetchTransactions();
   }, [user.id]);
 
-  // === НОВОЕ: Загрузка настроек оплаты при открытии ===
   useEffect(() => {
     if (showPaymentModal && paymentSettings.length === 0) {
       getPaymentSettings().then(data => setPaymentSettings(data)).catch(console.error);
@@ -456,6 +458,36 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
     try { await sendFeedback(user.full_name, msg); alert("Отзыв отправлен преподавателю! 💬"); } catch (err) { alert("Ошибка отправки"); }
   };
 
+  // === НОВАЯ ФУНКЦИЯ: Отправка отчета об оплате ===
+  const handleSendReport = async () => {
+    if (!reportAmount || !reportLessons || !reportDate) {
+      alert('Пожалуйста, заполните все поля!');
+      return;
+    }
+    
+    const amount = parseFloat(reportAmount);
+    const lessons = parseInt(reportLessons);
+    
+    if (isNaN(amount) || amount <= 0 || isNaN(lessons) || lessons <= 0) {
+      alert('Сумма и количество уроков должны быть больше 0');
+      return;
+    }
+
+    setReportSending(true);
+    try {
+      await sendPaymentReport(user.id, user.full_name, amount, lessons, reportDate);
+      alert('✅ Отчет отправлен! Преподаватель получит уведомление.');
+      // Очистить поля
+      setReportAmount('');
+      setReportLessons('');
+      setReportDate(new Date().toISOString().split('T')[0]);
+    } catch (err: any) {
+      alert('❌ Ошибка отправки: ' + err.message);
+    } finally {
+      setReportSending(false);
+    }
+  };
+
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text).then(() => {
       if (window.Telegram?.WebApp?.HapticFeedback) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
@@ -478,7 +510,7 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
       {/* Баланс */}
       <div className={`bg-white p-4 rounded-xl shadow flex justify-between items-center border-l-4 ${balClass}`}>
         <div><p className="text-sm text-gray-500">Баланс</p><p className="text-3xl font-bold">{user.balance}</p></div>
-        <div className="text-4xl">{user.balance <= 1 ? '💸' : ''}</div>
+        <div className="text-4xl">{user.balance <= 1 ? '💸' : '📚'}</div>
       </div>
 
       {/* Ближайший урок */}
@@ -491,7 +523,7 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
             <div className="bg-white/20 rounded-xl p-4 text-center my-4"><p className="text-4xl font-mono font-bold">{timeLeft}</p></div>
             <div className="flex flex-col gap-3">
               {nextLesson.meet_link ? (
-                <a href={nextLesson.meet_link} target="_blank" className="w-full bg-white text-blue-600 py-3 rounded-xl font-bold text-center">Войти в Meet 🎥</a>
+                <a href={nextLesson.meet_link} target="_blank" className="w-full bg-white text-blue-600 py-3 rounded-xl font-bold text-center">Войти в Meet </a>
               ) : (
                 <div className="w-full bg-gray-200 text-gray-500 py-3 rounded-xl font-bold text-center">Ссылка появится перед уроком ⏳</div>
               )}
@@ -505,7 +537,7 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
 
       {/* Материалы */}
       <div className="bg-white p-6 rounded-xl shadow">
-        <h3 className="font-bold text-lg mb-3">Материалы </h3>
+        <h3 className="font-bold text-lg mb-3">Материалы 📚</h3>
         {user.google_doc_url ? (
           <a href={user.google_doc_url} target="_blank" className="block w-full bg-green-50 text-green-700 py-3 rounded-lg text-center font-semibold border border-green-200">Открыть Документ ↗</a>
         ) : <p className="text-gray-500 text-sm">Нет ссылки</p>}
@@ -522,7 +554,7 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
 
       {/* История */}
       <div className="bg-white p-6 rounded-xl shadow">
-        <h3 className="font-bold text-lg mb-3">История баланса </h3>
+        <h3 className="font-bold text-lg mb-3">История баланса 📜</h3>
         {txLoading ? <p className="text-gray-500 text-sm">Загрузка...</p> : transactions.length === 0 ? (
           <p className="text-gray-500 text-sm">Операций пока нет</p>
         ) : (
@@ -545,8 +577,56 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
           onClick={() => setShowPaymentModal(true)}
           className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-bold text-lg shadow-md transition transform active:scale-95"
         >
-          Оплатить 
+          Оплатить 💳
         </button>
+      </div>
+
+      {/* === НОВАЯ ФОРМА: Сообщить о переводе === */}
+      <div className="bg-white p-6 rounded-xl shadow border-2 border-green-100">
+        <h3 className="font-bold text-lg mb-3 text-green-700">Сообщить о переводе 💰</h3>
+        <p className="text-sm text-gray-500 mb-4">Заполните данные после перевода, чтобы я мог начислить уроки.</p>
+        
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Сумма перевода (грн)</label>
+            <input 
+              type="number" 
+              value={reportAmount}
+              onChange={(e) => setReportAmount(e.target.value)}
+              placeholder="Например: 500"
+              className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-green-200 outline-none"
+            />
+          </div>
+          
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Количество уроков</label>
+            <input 
+              type="number" 
+              value={reportLessons}
+              onChange={(e) => setReportLessons(e.target.value)}
+              placeholder="Например: 5"
+              className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-green-200 outline-none"
+            />
+          </div>
+          
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Дата перевода</label>
+            <input 
+              type="date" 
+              value={reportDate}
+              onChange={(e) => setReportDate(e.target.value)}
+              className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-green-200 outline-none"
+            />
+          </div>
+          
+          <button 
+            onClick={handleSendReport}
+            disabled={reportSending}
+            className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold shadow-md transition disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+          >
+            {reportSending ? 'Отправка...' : 'Отправить отчет 📤'}
+          </button>
+        </div>
       </div>
 
       {/* МОДАЛЬНОЕ ОКНО ОПЛАТЫ (теперь с реальными данными) */}
@@ -627,7 +707,7 @@ function StudentDashboard({ telegramId, user }: { telegramId: string, user: any 
                   )}
                 </div>
                 
-                <p className="text-xs text-gray-400 text-center mb-6 italic">После перевода обязательно напишите мне сумму и дату в боте.</p>
+                <p className="text-xs text-gray-400 text-center mb-6 italic">После перевода заполните форму выше "Сообщить о переводе".</p>
                 <button onClick={() => { setShowPaymentModal(false); setSelectedBank(null); }} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl font-bold transition">Закрыть</button>
               </>
             )}
