@@ -144,6 +144,41 @@ function FinanceTab() {
     }
   };
 
+  const handleRejectRequest = async (request: any) => {
+    // 1. Проверяем, что заявка еще не обработана
+    if (request.status !== 'pending') return;
+    
+    // 2. Спрашиваем причину (можно оставить пустым)
+    const reason = prompt("Причина отклонения (необязательно):") || 'Без причины';
+    
+    // 3. Спрашиваем подтверждение
+    if (!confirm(`Отклонить заявку от ${request.student_name}?`)) return;
+    
+    // 4. Блокируем кнопку во время обработки
+    setProcessingId(request.id);
+    
+    try {
+      // 5. Обновляем статус в базе данных на 'rejected'
+      const { error } = await supabase
+        .from('payment_reports')
+        .update({ status: 'rejected' })
+        .eq('id', request.id);
+      
+      if (error) throw error;
+      
+      alert(' Заявка отклонена.');
+      
+      // 6. Перезагружаем список заявок
+      await loadRequests();
+      
+    } catch (err: any) {
+      alert('Ошибка: ' + err.message);
+    } finally {
+      // 7. Разблокируем кнопку
+      setProcessingId(null);
+    }
+  };
+
   return (
     <div className="p-4 space-y-4 pb-20">
       <div className="flex bg-gray-100 p-1 rounded-lg mb-4">
@@ -183,9 +218,18 @@ function FinanceTab() {
                     <h3 className="font-bold text-lg">{req.student_name}</h3>
                     <p className="text-sm text-gray-500">Дата: {req.payment_date}</p>
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold ${req.status === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                    {req.status === 'confirmed' ? 'ОК' : 'Новая'}
-                  </span>
+                 
+                 <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+  req.status === 'confirmed' ? 'bg-green-100 text-green-700' : 
+  req.status === 'rejected' ? 'bg-red-100 text-red-700' : 
+  'bg-yellow-100 text-yellow-700'
+}`}>
+  {req.status === 'confirmed' ? 'ОК' : 
+   req.status === 'rejected' ? 'Отклонено' : 
+   'Новая'}
+</span>
+
+
                 </div>
                 <div className="bg-gray-50 p-3 rounded-lg mb-3 flex justify-between items-center">
                   <div>
@@ -197,15 +241,31 @@ function FinanceTab() {
                     <p className="font-bold text-lg text-blue-600">{req.lessons_count}</p>
                   </div>
                 </div>
+                
                 {req.status === 'pending' && (
-                  <button
-                    onClick={() => handleConfirmRequest(req)}
-                    disabled={processingId === req.id}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-semibold transition disabled:opacity-50"
-                  >
-                    {processingId === req.id ? 'Обработка...' : 'Подтвердить и начислить ✅'}
-                  </button>
-                )}
+  <div className="flex gap-2 mt-3">
+    {/* Кнопка ПОДТВЕРДИТЬ */}
+    <button
+      onClick={() => handleConfirmRequest(req)}
+      disabled={processingId === req.id}
+      className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-semibold transition disabled:opacity-50"
+    >
+      {processingId === req.id ? '...' : 'Подтвердить ✅'}
+    </button>
+    
+    {/* Кнопка ОТКЛОНИТЬ */}
+    <button
+      onClick={() => handleRejectRequest(req)}
+      disabled={processingId === req.id}
+      className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg font-semibold transition disabled:opacity-50"
+    >
+      {processingId === req.id ? '...' : 'Отклонить ❌'}
+    </button>
+  </div>
+)}
+
+
+
               </div>
             ))
           )}
