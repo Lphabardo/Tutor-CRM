@@ -28,23 +28,33 @@ async function notifyTeacher(text: string, html = false) {
   });
 
   try {
-    // ОТПРАВЛЯЕМ НАПРЯМУЮ БЕЗ ПРОКСИ
-    const response = await fetch(url, {
+     // 1. Добавляем прокси-сервис, чтобы обойти блокировку браузера
+    const PROXY_URL = 'https://corsproxy.io/?';
+    
+    // 2. Формируем правильную ссылку: прокси + наш адрес Telegram
+    const proxyTarget = `${PROXY_URL}url=${encodeURIComponent(url)}`;
+
+    // 3. Отправляем запрос через прокси
+    const response = await fetch(proxyTarget, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest' 
+      },
       body: body
     });
 
+    // 4. Проверяем ответ
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`Ошибка Telegram API (${response.status}): ${JSON.stringify(errorData)}`);
+      const errorText = await response.text();
+      throw new Error(`Ошибка прокси (${response.status}): ${errorText}`);
     }
     
     const result = await response.json();
     if (result.ok) {
-      console.log('✅ Уведомление успешно отправлено!');
+      console.log('✅ Уведомление успешно отправлено через прокси!');
     } else {
-      console.error('Ошибка ответа Telegram:', result);
+      console.error('Ошибка Telegram API:', result);
     }
 
   } catch (err) {
