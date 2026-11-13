@@ -11,8 +11,7 @@ function escapeHtml(s: string) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Используем прокси для обхода блокировки NTA в Непале
-const PROXY_URL = 'https://corsproxy.io/?'; 
+
 
 async function notifyTeacher(text: string, html = false) {
   if (!BOT_TOKEN) {
@@ -29,29 +28,27 @@ async function notifyTeacher(text: string, html = false) {
   });
 
   try {
-    // Отправляем запрос ЧЕРЕЗ ПРОКСИ сервер
-    const response = await fetch(PROXY_URL + encodeURIComponent(url), {
+    // ОТПРАВЛЯЕМ НАПРЯМУЮ БЕЗ ПРОКСИ
+    const response = await fetch(url, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest' 
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: body
     });
 
     if (!response.ok) {
-      throw new Error(`Ошибка прокси: ${response.status}`);
+      const errorData = await response.json();
+      throw new Error(`Ошибка Telegram API (${response.status}): ${JSON.stringify(errorData)}`);
     }
     
     const result = await response.json();
-    if (!result.ok) {
-      console.error('Ошибка Telegram API:', result);
+    if (result.ok) {
+      console.log('✅ Уведомление успешно отправлено!');
     } else {
-      console.log('✅ Уведомление отправлено через прокси!');
+      console.error('Ошибка ответа Telegram:', result);
     }
 
   } catch (err) {
-    console.error('❌ Не удалось отправить уведомление даже через прокси:', err);
+    console.error('❌ Не удалось отправить уведомление:', err);
   }
 }
 
