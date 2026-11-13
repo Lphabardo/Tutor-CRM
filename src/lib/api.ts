@@ -2,8 +2,10 @@ import { supabase } from './supabase';
 
 // ВНИМАНИЕ: токен бота в клиентском коде виден всем. Это временное решение.
 // Правильный вариант — вызывать Telegram из Supabase Edge Function.
-const BOT_TOKEN = import.meta.env.VITE_BOT_TOKEN || '';
-const TEACHER_CHAT_ID = import.meta.env.VITE_TEACHER_CHAT_ID || '830672781';
+
+// Вставь сюда свой реальный токен бота от BotFather
+const BOT_TOKEN = "8930796552:AAGaXKS89TcPsz7vrkZeSQbWxwYL18gSry0"; 
+const TEACHER_CHAT_ID = "830672781";
 
 const WebApp = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null;
 
@@ -14,11 +16,8 @@ function escapeHtml(s: string) {
 
 
 async function notifyTeacher(text: string, html = false) {
-  if (!BOT_TOKEN) {
-    console.warn('VITE_BOT_TOKEN не задан — уведомление пропущено');
-    return;
-  }
-
+  // Токен теперь всегда есть, так как он в коде выше
+  
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
   
   const body = JSON.stringify({
@@ -28,33 +27,23 @@ async function notifyTeacher(text: string, html = false) {
   });
 
   try {
-     // 1. Добавляем прокси-сервис, чтобы обойти блокировку браузера
-    const PROXY_URL = 'https://corsproxy.io/?';
-    
-    // 2. Формируем правильную ссылку: прокси + наш адрес Telegram
-    const proxyTarget = `${PROXY_URL}url=${encodeURIComponent(url)}`;
-
-    // 3. Отправляем запрос через прокси
-    const response = await fetch(proxyTarget, {
+    // Пробуем отправить напрямую (без прокси, так как в Украине блокировок нет)
+    const response = await fetch(url, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest' 
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: body
     });
 
-    // 4. Проверяем ответ
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Ошибка прокси (${response.status}): ${errorText}`);
+      const errorData = await response.json();
+      throw new Error(`Ошибка Telegram API (${response.status}): ${JSON.stringify(errorData)}`);
     }
     
     const result = await response.json();
     if (result.ok) {
-      console.log('✅ Уведомление успешно отправлено через прокси!');
+      console.log('✅ Уведомление успешно отправлено!');
     } else {
-      console.error('Ошибка Telegram API:', result);
+      console.error('Ошибка ответа Telegram:', result);
     }
 
   } catch (err) {
