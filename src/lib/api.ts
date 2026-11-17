@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase } from '../supabase';
 
 // ВНИМАНИЕ: токен бота в клиентском коде виден всем. Это временное решение.
 // Правильный вариант — вызывать Telegram из Supabase Edge Function.
@@ -51,21 +51,11 @@ async function notifyTeacher(text: string, html = false) {
   }
 }
 
-function parseTelegramInitData(initData: string) {
-  const params = new URLSearchParams(initData);
-  const userStr = params.get('user');
-  if (!userStr) return null;
-  try {
-    // URLSearchParams.get уже декодирует значение, повторный decodeURIComponent не нужен
-    return JSON.parse(userStr);
-  } catch {
-    return null;
-  }
-}
+
 
 export async function authenticateUser() {
-  if (!WebApp) {
-    // Режим разработки вне Telegram
+  // Режим разработки вне Telegram: только при запуске npm run dev
+  if (!WebApp && import.meta.env.DEV) {
     return {
       success: true,
       id: 'test-user-id',
@@ -83,112 +73,43 @@ export async function authenticateUser() {
     };
   }
 
+  const initData: string = WebApp?.initData || '';
+  if (!initData) {
+    throw new Error('Откройте приложение через Telegram-бота.');
+  }
+
   WebApp.ready();
   WebApp.expand();
 
-  let telegramId: string | null = null;
-  let fullName = 'Ученик';
-  const initData = WebApp.initData;
-
-  if (initData) {
-    const telegramUser = parseTelegramInitData(initData);
-    if (telegramUser) {
-      telegramId = telegramUser.id?.toString() || null;
-      fullName = `${telegramUser.first_name || ''} ${telegramUser.last_name || ''}`.trim() || 'Ученик';
+  // Единственный источник правды: подпись Telegram проверяет Edge Function
+  const response = await fetch(
+    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-telegram`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData })
     }
+  );
+  const data = await response.json();
+
+  if (!data.success) {
+    throw new Error('Не удалось подтвердить личность. Закройте и откройте приложение заново через бота.');
   }
-
-  if (!telegramId && WebApp.initDataUnsafe?.user) {
-    const unsafeUser = WebApp.initDataUnsafe.user;
-    telegramId = unsafeUser.id?.toString() || null;
-    fullName = `${unsafeUser.first_name || ''} ${unsafeUser.last_name || ''}`.trim() || 'Ученик';
-  }
-
-  if (!telegramId) {
-    throw new Error('Не удалось получить данные пользователя Telegram. Пожалуйста, закройте и откройте приложение заново через бота.');
-  }
-
-  if (initData) {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-telegram`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) }
-      );
-      const data = await response.json();
-      if (data.success && data.role) {
-        return {
-          success: true,
-          // ИСПРАВЛЕНО: App.tsx использует user.id, а раньше здесь возвращался только user_id
-          id: data.user_id,
-          telegram_id: data.telegram_id,
-          role: data.role,
-          full_name: data.full_name,
-          balance: data.balance,
-          user_id: data.user_id,
-          is_new: data.is_new,
-          language: data.language,
-          google_doc_url: data.google_doc_url,
-          price_per_lesson: data.price_per_lesson || 0,
-          fixed_schedule: data.fixed_schedule || '',
-          rules_text: data.rules_text || ''
-        };
-      }
-    } catch (err) {
-      console.error('Ошибка проверки initData:', err);
-    }
-  }
-
-  const { data: existingUser } = await supabase
-    .from('tutor_profiles')
-    .select('*')
-    .eq('telegram_id', telegramId)
-    .maybeSingle();
-
-  if (existingUser) {
-    return {
-      success: true,
-      ...existingUser,
-      telegram_id: telegramId,
-      user_id: existingUser.id,
-      price_per_lesson: existingUser.price_per_lesson || 0,
-      fixed_schedule: existingUser.fixed_schedule || '',
-      rules_text: existingUser.rules_text || ''
-    };
-  }
-
-  const { data: tutorRules } = await supabase
-    .from('tutor_profiles')
-    .select('rules_text')
-    .eq('role', 'tutor')
-    .maybeSingle();
-
-  const { data: newUser, error: insertError } = await supabase
-    .from('tutor_profiles')
-    .insert([{
-      telegram_id: telegramId,
-      full_name: fullName,
-      role: 'student',
-      balance: 0,
-      is_new: true,
-      language: null,
-      google_doc_url: null,
-      price_per_lesson: 0,
-      fixed_schedule: '',
-      rules_text: tutorRules?.rules_text || ''
-    }])
-    .select()
-    .single();
-
-  if (insertError) throw insertError;
 
   return {
     success: true,
-    ...newUser,
-    telegram_id: telegramId,
-    user_id: newUser.id,
-    price_per_lesson: newUser.price_per_lesson || 0,
-    fixed_schedule: newUser.fixed_schedule || '',
-    rules_text: newUser.rules_text || ''
+    id: data.user_id,
+    telegram_id: data.telegram_id,
+    role: data.role,
+    full_name: data.full_name,
+    balance: data.balance,
+    user_id: data.user_id,
+    is_new: data.is_new,
+    language: data.language,
+    google_doc_url: data.google_doc_url,
+    price_per_lesson: data.price_per_lesson || 0,
+    fixed_schedule: data.fixed_schedule || '',
+    rules_text: data.rules_text || ''
   };
 }
 
